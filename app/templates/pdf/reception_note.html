@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>RECEPTION NOTE</title>
+	<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+	<main class="document document--reception-note">
+		<div class="page-container">
+			<header class="document-header">
+				<div class="document-header__logos">
+					<div class="document-header__brand">
+						<img
+							class="document-header__logo document-header__logo--left"
+							src="../../static/images/greensharelogo.png"
+							alt="Greenshare logo"
+						/>
+					</div>
+
+					<div class="document-header__brand document-header__brand--right">
+						<img
+							class="document-header__logo document-header__logo--right"
+							src="../../static/images/zerowastecolorlogo.png"
+							alt="Zero Waste logo"
+						/>
+					</div>
+				</div>
+
+				<div class="document-header__title-row">
+					<h1 class="document-header__title">RECEPTION NOTE</h1>
+				</div>
+			</header>
+
+			<section class="document-section">
+			<div class="document-section__heading">
+				<p class="document-section__index">Section 1</p>
+				<h2 class="document-section__title">Traceability Details</h2>
+			</div>
+			<div class="field-grid field-grid--three-column">
+				<div class="field-item">
+					<span class="field-item__label">RNID Date</span>
+					<span class="field-item__value">{{ rnid_date }}</span>
+				</div>
+				<div class="field-item">
+					<span class="field-item__label">RNID</span>
+					<span class="field-item__value">{{ rnid }}</span>
+				</div>
+				<div class="field-item">
+					<span class="field-item__label">CID</span>
+					<span class="field-item__value">{{ customer_id }}</span>
+				</div>
+				<div class="field-item" aria-hidden="true"></div>
+				<div class="field-item" aria-hidden="true"></div>
+				<div class="field-item">
+					<span class="field-item__label">Total Quantity</span>
+					<span class="field-item__value">{{ total_quantity }}</span>
+				</div>
+			</div>
+			</section>
+
+			<section class="document-section">
+			<div class="document-section__heading">
+				<p class="document-section__index">Section 2</p>
+				<h2 class="document-section__title">Producing Company</h2>
+			</div>
+			<div class="field-grid field-grid--three-column">
+				<div class="field-item">
+					<span class="field-item__label">Customer Name</span>
+					<span class="field-item__value">{{ customer_name }}</span>
+				</div>
+				<div class="field-item">
+					<span class="field-item__label">Emirate</span>
+					<span class="field-item__value">{{ producing_company_emirate }}</span>
+				</div>
+				<div class="field-item">
+					<span class="field-item__label">Office Address</span>
+					<span class="field-item__value field-item__value--compact">{{ producing_company_office_address }}</span>
+				</div>
+				<div class="field-item">
+					<span class="field-item__label">Contact Person</span>
+					<span class="field-item__value field-item__value--compact">{{ producing_company_contact_person }}</span>
+				</div>
+				<div class="field-item">
+					<span class="field-item__label">Office Phone</span>
+					<span class="field-item__value field-item__value--compact">{{ producing_company_office_phone }}</span>
+				</div>
+				<div class="field-item">
+					<span class="field-item__label">Email</span>
+					<span class="field-item__value">{{ producing_company_email }}</span>
+				</div>
+			</div>
+			</section>
+
+			<section class="document-section">
+			<div class="document-section__heading">
+				<p class="document-section__index">Section 3</p>
+				<h2 class="document-section__title">Transporting Company</h2>
+			</div>
+			<div class="field-grid field-grid--two-column">
+				<div class="field-item">
+					<span class="field-item__label">Company Name</span>
+					<span class="field-item__value">{{ transporting_company_name }}</span>
+				</div>
+				<div class="field-item">
+					<span class="field-item__label">Contact Person</span>
+					<span class="field-item__value">{{ transporting_company_contact_person }}</span>
+				</div>
+				<div class="field-item">
+					<span class="field-item__label">Office Phone</span>
+					<span class="field-item__value">{{ transporting_company_office_phone }}</span>
+				</div>
+				<div class="field-item">
+					<span class="field-item__label">Email</span>
+					<span class="field-item__value">{{ transporting_company_email }}</span>
+				</div>
+			</div>
+			</section>
+
+			<section class="document-section">
+			<div class="document-section__heading">
+				<p class="document-section__index">Section 4</p>
+				<h2 class="document-section__title">Vehicle Details</h2>
+			</div>
+			<div class="field-grid field-grid--two-column">
+				<div class="field-item">
+					<span class="field-item__label">Vehicle Number</span>
+					<span class="field-item__value">{{ vehicle_number or vehicle_plate_no }}</span>
+				</div>
+				<div class="field-item">
+					<span class="field-item__label">Driver Name</span>
+					<span class="field-item__value">{{ driver_name }}</span>
+				</div>
+			</div>
+			</section>
+
+			<section class="document-section document-section--waste-stream">
+			<div class="document-section__heading">
+				<p class="document-section__index">Section 5</p>
+				<h2 class="document-section__title">Waste Stream Details</h2>
+			</div>
+			<div class="waste-stream-tables">
+				<table class="document-table document-table--waste-stream document-table--waste-stream-quad">
+					<thead>
+						<tr>
+							<th>Code</th>
+							<th>Waste Stream Name</th>
+							<th>Class</th>
+							<th>Physical State</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr>
+							<td>{{ waste_stream_code }}</td>
+							<td>{{ waste_stream_name }}</td>
+							<td>{{ waste_stream_class }}</td>
+							<td>{{ waste_stream_physical_state }}</td>
+						</tr>
+					</tbody>
+				</table>
+
+				<table class="document-table document-table--waste-stream document-table--waste-stream-penta">
+					<thead>
+						<tr>
+							<th>Quantity</th>
+							<th>Quantity Unit</th>
+							<th>Collection Emirate</th>
+							<th>Collection Location</th>
+							<th>Reception Date</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr>
+							<td>{{ waste_stream_quantity }}</td>
+							<td>{{ waste_stream_quantity_unit }}</td>
+							<td>{{ waste_stream_collection_emirate | default('') }}</td>
+							<td>{{ waste_stream_collection_location }}</td>
+							<td>{{ waste_stream_reception_date }}</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+			</section>
+
+			<section class="document-section">
+			<div class="document-section__heading">
+				<p class="document-section__index">Section 6</p>
+				<h2 class="document-section__title">Reception Note Verification</h2>
+			</div>
+			<div class="field-grid field-grid--two-column">
+				<div class="field-item">
+					<span class="field-item__label">Issued By</span>
+					<span class="field-item__value">{{ issued_by }}</span>
+				</div>
+			</div>
+			</section>
+
+			<footer class="document-footer">
+				<p class="document-footer__disclaimer">System Note: This document is generated by Greenshare, a circular intelligence and traceability platform.</p>
+			</footer>
+		</div>
+	</main>
+</body>
+</html>

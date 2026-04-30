@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>RECEPTION CERTIFICATE</title>
+	<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+	<main class="document document--reception-certificate reception-certificate">
+		<div class="page-container">
+			<header class="document-header">
+				<div class="document-header__logos">
+					<div class="document-header__brand">
+						<img
+							class="document-header__logo document-header__logo--left"
+							src="../../static/images/greensharelogo.png"
+							alt="Greenshare logo"
+						/>
+					</div>
+
+					<div class="document-header__brand document-header__brand--right">
+						<img
+							class="document-header__logo document-header__logo--right"
+							src="../../static/images/zerowastecolorlogo.png"
+							alt="Zero Waste logo"
+						/>
+					</div>
+				</div>
+
+				<div class="document-header__title-row">
+					<h1 class="document-header__title">RECEPTION CERTIFICATE</h1>
+				</div>
+			</header>
+
+			<section class="document-section">
+				<div class="document-section__heading">
+					<p class="document-section__index">Section 1</p>
+					<h2 class="document-section__title">Traceability Details</h2>
+				</div>
+				<div class="field-grid field-grid--traceability-balance">
+					<div class="field-item">
+						<span class="field-item__label">RCID Date</span>
+						<span class="field-item__value">{{ rcid_date }}</span>
+					</div>
+					<div class="field-item">
+						<span class="field-item__label">RCID</span>
+						<span class="field-item__value">{{ rcid }}</span>
+					</div>
+					<div class="field-item">
+						<span class="field-item__label">CID</span>
+						<span class="field-item__value">{{ customer_id }}</span>
+					</div>
+					<div class="field-item field-item--span-two">
+						<span class="field-item__label">Linked RNIDs</span>
+						<div class="field-item__value">{{ linked_rnids }}</div>
+					</div>
+					<div class="field-item">
+						<span class="field-item__label">Total Quantity</span>
+						<span class="field-item__value">{{ total_quantity }}</span>
+					</div>
+				</div>
+			</section>
+
+			<section class="document-section">
+				<div class="document-section__heading">
+					<p class="document-section__index">Section 2</p>
+					<h2 class="document-section__title">Producing Company</h2>
+				</div>
+				<div class="field-grid field-grid--three-column">
+					<div class="field-item">
+						<span class="field-item__label">Company Name</span>
+						<span class="field-item__value">{{ producing_company_name }}</span>
+					</div>
+					<div class="field-item">
+						<span class="field-item__label">Emirate</span>
+						<span class="field-item__value">{{ producing_company_emirate }}</span>
+					</div>
+					<div class="field-item">
+						<span class="field-item__label">Office Address</span>
+						<span class="field-item__value field-item__value--compact">{{ producing_company_office_address }}</span>
+					</div>
+					<div class="field-item">
+						<span class="field-item__label">Contact Person</span>
+						<span class="field-item__value field-item__value--compact">{{ producing_company_contact_person }}</span>
+					</div>
+					<div class="field-item">
+						<span class="field-item__label">Office Phone</span>
+						<span class="field-item__value field-item__value--compact">{{ producing_company_office_phone }}</span>
+					</div>
+					<div class="field-item">
+						<span class="field-item__label">Email</span>
+						<span class="field-item__value">{{ producing_company_email }}</span>
+					</div>
+				</div>
+			</section>
+
+			{% if has_multiple_linked_entries %}
+			<section class="document-section reception-certificate__linked-notes-section">
+				<div class="document-section__heading">
+					<p class="document-section__index">Section 3</p>
+					<h2 class="document-section__title">Linked Reception Notes</h2>
+				</div>
+				<div class="reception-certificate__linked-entries">
+					{% for entry in linked_entries %}
+					<article class="reception-certificate__linked-entry">
+						<div class="reception-certificate__linked-entry-heading">
+							<h3 class="reception-certificate__linked-entry-title">Linked Reception Note {{ loop.index }}</h3>
+							<div class="field-item reception-certificate__linked-entry-rnid">
+								<span class="field-item__label">RNID</span>
+								<span class="field-item__value">{{ entry.rnid }}</span>
+							</div>
+						</div>
+
+						<div class="reception-certificate__entry-section">
+							<h4 class="reception-certificate__entry-section-title">Transporting Company</h4>
+							<div class="field-grid field-grid--two-column">
+								<div class="field-item">
+									<span class="field-item__label">Company Name</span>
+									<span class="field-item__value">{{ entry.transporting_company.name }}</span>
+								</div>
+								<div class="field-item">
+									<span class="field-item__label">Contact Person</span>
+									<span class="field-item__value">{{ entry.transporting_company.contact_person }}</span>
+								</div>
+								<div class="field-item">
+									<span class="field-item__label">Office Phone</span>
+									<span class="field-item__value">{{ entry.transporting_company.office_phone }}</span>
+								</div>
+								<div class="field-item">
+									<span class="field-item__label">Email</span>
+									<span class="field-item__value">{{ entry.transporting_company.email }}</span>
+								</div>
+							</div>
+						</div>
+
+						<div class="reception-certificate__entry-section">
+							<h4 class="reception-certificate__entry-section-title">Vehicle Details</h4>
+							<div class="field-grid field-grid--two-column">
+								<div class="field-item">
+									<span class="field-item__label">Vehicle Plate No</span>
+									<span class="field-item__value">{{ entry.vehicle_details.vehicle_plate_no }}</span>
+								</div>
+								<div class="field-item">
+									<span class="field-item__label">Driver Name</span>
+									<span class="field-item__value">{{ entry.vehicle_details.driver_name }}</span>
+								</div>
+							</div>
+						</div>
+
+						<div class="reception-certificate__entry-section">
+							<h4 class="reception-certificate__entry-section-title">Waste Stream Details</h4>
+							<div class="reception-certificate__entry-waste-streams">
+								{% for waste_stream in entry.waste_streams %}
+								<div class="reception-certificate__entry-waste-stream">
+									{% if entry.waste_streams|length > 1 %}
+									<p class="reception-certificate__entry-waste-stream-label">Waste Stream {{ loop.index }}</p>
+									{% endif %}
+									<div class="waste-stream-tables">
+										<table class="document-table document-table--waste-stream document-table--waste-stream-quad">
+											<thead>
+												<tr>
+													<th>Code</th>
+													<th>Name</th>
+													<th>Class</th>
+													<th>Physical State</th>
+												</tr>
+											</thead>
+											<tbody>
+												<tr>
+													<td>{{ waste_stream.code }}</td>
+													<td>{{ waste_stream.name }}</td>
+													<td>{{ waste_stream.waste_class }}</td>
+													<td>{{ waste_stream.physical_state }}</td>
+												</tr>
+											</tbody>
+										</table>
+
+										<table class="document-table document-table--waste-stream document-table--waste-stream-penta">
+											<thead>
+												<tr>
+													<th>Quantity</th>
+													<th>Quantity Unit</th>
+													<th>Collection Emirate</th>
+													<th>Collection Location</th>
+													<th>Reception Date</th>
+												</tr>
+											</thead>
+											<tbody>
+												<tr>
+													<td>{{ waste_stream.quantity }}</td>
+													<td>{{ waste_stream.quantity_unit }}</td>
+													<td>{{ waste_stream.collection_emirate | default('') }}</td>
+													<td>{{ waste_stream.collection_location }}</td>
+													<td>{{ waste_stream.reception_date }}</td>
+												</tr>
+											</tbody>
+										</table>
+									</div>
+								</div>
+								{% endfor %}
+							</div>
+						</div>
+					</article>
+					{% endfor %}
+				</div>
+			</section>
+
+			<section class="document-section">
+				<div class="document-section__heading">
+					<p class="document-section__index">Section 4</p>
+					<h2 class="document-section__title">Waste Reception Facilities</h2>
+				</div>
+				<div class="field-grid field-grid--two-column">
+					<div class="field-item field-item--full-width">
+						<span class="field-item__label">Facilities Name</span>
+						<span class="field-item__value">{{ facilities_name or "Zero Waste - Circular Processing Facilities" }}</span>
+					</div>
+				</div>
+			</section>
+
+			<section class="document-section">
+				<div class="document-section__heading">
+					<p class="document-section__index">Section 5</p>
+					<h2 class="document-section__title">Reception Certificate Verification</h2>
+				</div>
+				<div class="field-grid field-grid--three-column">
+					<div class="field-item">
+						<span class="field-item__label">Issued By</span>
+						<span class="field-item__value">{{ issued_by }}</span>
+					</div>
+					<div class="field-item">
+						<span class="field-item__label">Verified By</span>
+						<span class="field-item__value">{{ verified_by or "Imran Gill" }}</span>
+					</div>
+					<div class="field-item">
+						<span class="field-item__label">Position</span>
+						<span class="field-item__value">{{ verified_by_position or "CEO" }}</span>
+						<img
+							class="document-header__logo reception-certificate__signature"
+							src="../../static/images/igsignaturezwstamp.png"
+							alt="Signature and stamp"
+						/>
+					</div>
+				</div>
+			</section>
+			{% else %}
+			<section class="document-section">
+				<div class="document-section__heading">
+					<p class="document-section__index">Section 3</p>
+					<h2 class="document-section__title">Transporting Company</h2>
+				</div>
+				<div class="field-grid field-grid--two-column">
+					<div class="field-item">
+						<span class="field-item__label">Company Name</span>
+						<span class="field-item__value">{{ transporting_company_name }}</span>
+					</div>
+					<div class="field-item">
+						<span class="field-item__label">Contact Person</span>
+						<span class="field-item__value">{{ transporting_company_contact_person }}</span>
+					</div>
+					<div class="field-item">
+						<span class="field-item__label">Office Phone</span>
+						<span class="field-item__value">{{ transporting_company_office_phone }}</span>
+					</div>
+					<div class="field-item">
+						<span class="field-item__label">Email</span>
+						<span class="field-item__value">{{ transporting_company_email }}</span>
+					</div>
+				</div>
+			</section>
+
+			<section class="document-section">
+				<div class="document-section__heading">
+					<p class="document-section__index">Section 4</p>
+					<h2 class="document-section__title">Vehicle Details</h2>
+				</div>
+				<div class="field-grid field-grid--two-column">
+					<div class="field-item">
+						<span class="field-item__label">Vehicle Plate No</span>
+						<span class="field-item__value">{{ vehicle_plate_no }}</span>
+					</div>
+					<div class="field-item">
+						<span class="field-item__label">Driver Name</span>
+						<span class="field-item__value">{{ driver_name }}</span>
+					</div>
+				</div>
+			</section>
+
+			<section class="document-section document-section--waste-stream">
+				<div class="document-section__heading">
+					<p class="document-section__index">Section 5</p>
+					<h2 class="document-section__title">Waste Stream Details</h2>
+				</div>
+				<div class="waste-stream-tables">
+					<table class="document-table document-table--waste-stream document-table--waste-stream-quad">
+						<thead>
+							<tr>
+								<th>Code</th>
+								<th>Name</th>
+								<th>Class</th>
+								<th>Physical State</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td>{{ waste_stream_code }}</td>
+								<td>{{ waste_stream_name }}</td>
+								<td>{{ waste_stream_class }}</td>
+								<td>{{ waste_stream_physical_state }}</td>
+							</tr>
+						</tbody>
+					</table>
+
+					<table class="document-table document-table--waste-stream document-table--waste-stream-penta">
+						<thead>
+							<tr>
+								<th>Quantity</th>
+								<th>Quantity Unit</th>
+								<th>Collection Emirate</th>
+								<th>Collection Location</th>
+								<th>Reception Date</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td>{{ waste_stream_quantity }}</td>
+								<td>{{ waste_stream_quantity_unit }}</td>
+								<td>{{ waste_stream_collection_emirate | default('') }}</td>
+								<td>{{ waste_stream_collection_location }}</td>
+								<td>{{ waste_stream_reception_date }}</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</section>
+
+			<section class="document-section">
+				<div class="document-section__heading">
+					<p class="document-section__index">Section 6</p>
+					<h2 class="document-section__title">Waste Reception Facilities</h2>
+				</div>
+				<div class="field-grid field-grid--two-column">
+					<div class="field-item field-item--full-width">
+						<span class="field-item__label">Facilities Name</span>
+						<span class="field-item__value">{{ facilities_name or "Zero Waste - Circular Processing Facilities" }}</span>
+					</div>
+				</div>
+			</section>
+
+			<section class="document-section">
+				<div class="document-section__heading">
+					<p class="document-section__index">Section 7</p>
+					<h2 class="document-section__title">Reception Certificate Verification</h2>
+				</div>
+				<div class="field-grid field-grid--three-column">
+					<div class="field-item">
+						<span class="field-item__label">Issued By</span>
+						<span class="field-item__value">{{ issued_by }}</span>
+					</div>
+					<div class="field-item">
+						<span class="field-item__label">Verified By</span>
+						<span class="field-item__value">{{ verified_by or "Imran Gill" }}</span>
+					</div>
+					<div class="field-item">
+						<span class="field-item__label">Position</span>
+						<span class="field-item__value">{{ verified_by_position or "CEO" }}</span>
+						<img
+							class="document-header__logo reception-certificate__signature"
+							src="../../static/images/igsignaturezwstamp.png"
+							alt="Signature and stamp"
+						/>
+					</div>
+				</div>
+			</section>
+			{% endif %}
+
+			<footer class="document-footer">
+				<p class="document-footer__disclaimer">System Note: This document is generated by Greenshare, a circular intelligence and traceability platform.</p>
+			</footer>
+		</div>
+	</main>
+</body>
+</html>
