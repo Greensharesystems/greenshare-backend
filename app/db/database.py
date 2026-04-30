@@ -1,5 +1,6 @@
 from collections.abc import Generator
 import logging
+import os
 import re
 
 from sqlalchemy import create_engine, text
@@ -7,25 +8,40 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-from app.core.config import get_settings
-
-
-settings = get_settings()
 logger = logging.getLogger(__name__)
 
+def resolve_database_url() -> str:
+	environment_name = os.getenv("ENV", "").strip().lower()
+	database_url = os.getenv("DATABASE_URL")
+	local_database_url = os.getenv("LOCAL_DATABASE_URL")
+
+	if database_url:
+		return database_url
+
+	if environment_name == "development":
+		return local_database_url or "sqlite:///./greenshare.db"
+
+	raise RuntimeError("DATABASE_URL is not set")
+
+
+DATABASE_URL = resolve_database_url()
 engine_kwargs: dict[str, object] = {"pool_pre_ping": True}
 
-if settings.database_url.startswith("sqlite"):
+if DATABASE_URL.startswith("sqlite"):
 	engine_kwargs["connect_args"] = {"check_same_thread": False}
 
 
-engine = create_engine(settings.database_url, **engine_kwargs)
+engine = create_engine(DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
 def _is_postgresql_url(database_url: str) -> bool:
 	return make_url(database_url).get_backend_name().startswith("postgresql")
+
+
+def get_database_backend_label() -> str:
+	return "PostgreSQL" if _is_postgresql_url(DATABASE_URL) else "SQLite"
 
 
 def _build_admin_database_url(target_url: URL) -> URL:
@@ -40,10 +56,10 @@ def _validate_database_name(database_name: str) -> str:
 
 
 def ensure_database_exists() -> None:
-	if not _is_postgresql_url(settings.database_url):
+	if not _is_postgresql_url(DATABASE_URL):
 		return
 
-	target_url = make_url(settings.database_url)
+	target_url = make_url(DATABASE_URL)
 	target_database = target_url.database
 
 	if not target_database or target_database == "postgres":
@@ -76,7 +92,7 @@ def ensure_database_exists() -> None:
 def initialize_database() -> None:
 	try:
 		ensure_database_exists()
-		Base.metadata.create_all(bind=engine)
+		Base.metadata.create_all(bind=engine, checkfirst=True)
 	except SQLAlchemyError as exc:
 		logger.exception("Database initialization failed.")
 		raise RuntimeError(
