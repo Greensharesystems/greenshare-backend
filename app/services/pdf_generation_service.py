@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+import logging
 from pathlib import Path
 import re
 import subprocess
@@ -17,6 +18,8 @@ BROWSER_CANDIDATES = (
 	Path("C:/Program Files (x86)/Google/Chrome/Application/chrome.exe"),
 	Path("C:/Program Files/Google/Chrome/Application/chrome.exe"),
 )
+
+logger = logging.getLogger(__name__)
 
 
 class PdfGenerationService:
@@ -123,6 +126,8 @@ class PdfGenerationService:
 		return re.sub(r'(<(?:img|source)[^>]+src=["\'])([^"\']+)(["\'][^>]*>)', replace_source, rendered_html, flags=re.IGNORECASE)
 
 	def _render_pdf_with_browser(self, prepared_html: str, template_path: Path) -> bytes:
+		browser_executable = self._get_browser_executable()
+
 		with tempfile.TemporaryDirectory(prefix="greenshare-pdf-") as temp_dir_name:
 			temp_dir = Path(temp_dir_name)
 			html_output_path = temp_dir / template_path.name
@@ -132,7 +137,7 @@ class PdfGenerationService:
 
 			html_output_path.write_text(prepared_html, encoding="utf-8")
 			command = [
-				str(self.browser_executable),
+				str(browser_executable),
 				"--headless=new",
 				"--disable-gpu",
 				"--no-first-run",
@@ -154,12 +159,29 @@ class PdfGenerationService:
 
 			return pdf_output_path.read_bytes()
 
-	def _find_browser_executable(self) -> Path:
+	def _get_browser_executable(self) -> Path:
+		if self.browser_executable is None:
+			self.browser_executable = self._find_browser_executable()
+
+		if self.browser_executable is None:
+			raise RuntimeError(
+				"PDF generation requires a supported Edge or Chrome browser executable, but none was found. "
+				"Install a supported browser or configure the PDF generation environment before calling this endpoint."
+			)
+
+		return self.browser_executable
+
+	def _find_browser_executable(self) -> Path | None:
 		for candidate in BROWSER_CANDIDATES:
 			if candidate.is_file():
+				logger.info("Using browser executable for PDF generation: %s", candidate)
 				return candidate
 
-		raise FileNotFoundError("No supported Edge or Chrome browser executable was found for PDF generation.")
+		logger.warning(
+			"No supported Edge or Chrome browser executable was found for PDF generation. "
+			"PDF endpoints will return an error until a supported browser is available."
+		)
+		return None
 
 	def _to_directory_uri(self, path: Path) -> str:
 		directory_uri = path.resolve().as_uri()

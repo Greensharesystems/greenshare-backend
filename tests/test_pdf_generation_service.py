@@ -1,3 +1,5 @@
+import pytest
+
 from app.services.pdf_generation_service import PDF_SHARED_STYLESHEET, PdfGenerationService, generate_pdf
 
 
@@ -374,3 +376,15 @@ def test_render_circularity_certificate_template_supports_multi_linked_entries()
 	assert "Metal Scrap" in rendered_html
 	assert "Material" in rendered_html
 	assert "Energy" in rendered_html
+
+
+def test_pdf_generation_defers_missing_browser_failure(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+	caplog.set_level("WARNING")
+	monkeypatch.setattr(PdfGenerationService, "_find_browser_executable", lambda self: None)
+	service = PdfGenerationService()
+
+	assert service.browser_executable is None
+	assert "No supported Edge or Chrome browser executable was found" in caplog.text
+
+	with pytest.raises(RuntimeError, match="PDF generation requires a supported Edge or Chrome browser executable"):
+		service.generate_pdf("pdf/reception_note.html", build_reception_note_pdf_context())
