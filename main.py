@@ -5,7 +5,7 @@ import re
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy import inspect, or_, text
 from sqlalchemy.orm import Session
 
@@ -25,6 +25,9 @@ from app.models.reception_note import ReceptionNote
 from app.models.user import User
 from app.services.customer_service import CUSTOMER_AUTH_DISABLED, NO_CUSTOMER_USER_ACTIVITY
 
+
+SEED_ADMIN_EMAIL = "imran.g@zerowaste.ae"
+SEED_ADMIN_PASSWORD = "greenshare"
 
 app = FastAPI()
 logger = logging.getLogger(__name__)
@@ -80,8 +83,44 @@ def startup_database() -> None:
     try:
         Base.metadata.create_all(bind=engine, checkfirst=True)
         ensure_password_schema()
+        seed_admin_user()
     except Exception as exc:
         print("DB init warning:", exc)
+
+
+def seed_admin_user() -> None:
+    # Temporary Azure bootstrap seed; remove after the initial admin is provisioned.
+    with SessionLocal() as db:
+        existing_user = db.query(User).filter(User.email == SEED_ADMIN_EMAIL).first()
+
+        if existing_user is not None:
+            logger.info("Seed admin exists")
+            return
+
+        seed_user = User(
+            user_id_date="20260430",
+            user_id="UID-0001",
+            first_name="Imran",
+            last_name="Gill",
+            email=SEED_ADMIN_EMAIL,
+            position="Admin",
+            department="Management",
+            mobile_phone="0000000000",
+            company="Zero Waste",
+            role="Admin",
+            customer_id="CID-ADMIN",
+            password_hash=hash_password(SEED_ADMIN_PASSWORD),
+            last_active=format_last_active(datetime.now()),
+        )
+
+        db.add(seed_user)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            logger.info("Seed admin exists")
+            return
+        logger.info("Seed admin created")
 
 
 def format_last_active(value: datetime) -> str:
