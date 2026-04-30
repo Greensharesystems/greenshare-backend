@@ -1,9 +1,11 @@
 import json
 from datetime import datetime
+import logging
 import re
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import inspect, or_, text
 from sqlalchemy.orm import Session
 
@@ -15,7 +17,7 @@ from app.api.reception_certificates import router as reception_certificates_rout
 from app.api.reception_notes import router as reception_notes_router
 from app.api.users import router as users_router
 from app.core.config import DEFAULT_USER_PASSWORD, hash_password
-from app.db.database import Base, SessionLocal, engine
+from app.db.database import SessionLocal, engine, initialize_database
 from app.models.customer import Customer
 from app.models.circularity_certificate import CircularityCertificate
 from app.models.reception_certificate import ReceptionCertificate
@@ -25,8 +27,7 @@ from app.services.customer_service import CUSTOMER_AUTH_DISABLED, NO_CUSTOMER_US
 
 
 app = FastAPI()
-
-Base.metadata.create_all(bind=engine)
+logger = logging.getLogger(__name__)
 
 app.add_middleware(
     CORSMiddleware,
@@ -61,10 +62,23 @@ def health_check() -> dict[str, str]:
 
 @app.get("/health/db")
 def database_health_check() -> dict[str, str]:
-    with engine.connect() as connection:
-        connection.execute(text("SELECT 1"))
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except SQLAlchemyError as exc:
+        logger.exception("Database health check failed.")
+        raise HTTPException(
+            status_code=503,
+            detail="Database connection failed. Verify Azure PostgreSQL connectivity and DATABASE_URL.",
+        ) from exc
 
     return {"status": "connected", "database": "azure_postgresql"}
+
+
+@app.on_event("startup")
+def startup_database() -> None:
+    initialize_database()
+    ensure_password_schema()
 
 
 def format_last_active(value: datetime) -> str:
@@ -429,6 +443,3 @@ def get_customer_segment(customer_id: str, fallback_identifier: str) -> str:
         return f"{int(fallback_parts[1]):04d}"
 
     return "0000"
-
-
-ensure_password_schema()
