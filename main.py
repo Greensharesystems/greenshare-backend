@@ -2,7 +2,6 @@ import json
 from datetime import datetime
 import logging
 import re
-import os
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,7 +17,7 @@ from app.api.reception_certificates import router as reception_certificates_rout
 from app.api.reception_notes import router as reception_notes_router
 from app.api.users import router as users_router
 from app.core.config import DEFAULT_USER_PASSWORD, hash_password
-from app.db.database import SessionLocal, engine, get_database_backend_label, initialize_database
+from app.db.database import Base, SessionLocal, engine
 from app.models.customer import Customer
 from app.models.circularity_certificate import CircularityCertificate
 from app.models.reception_certificate import ReceptionCertificate
@@ -78,18 +77,11 @@ def database_health_check() -> dict[str, str]:
 
 @app.on_event("startup")
 def startup_database() -> None:
-    logger.info("Starting Greenshare backend with %s database.", get_database_backend_label())
-
     try:
-        initialize_database()
+        Base.metadata.create_all(bind=engine, checkfirst=True)
         ensure_password_schema()
-    except RuntimeError as exc:
-        if str(exc) == "DATABASE_URL is not set":
-            raise
-
-        logger.exception("Database startup initialization failed; continuing without blocking the API.")
-    except SQLAlchemyError:
-        logger.exception("Database startup initialization failed; continuing without blocking the API.")
+    except Exception as exc:
+        print("DB init warning:", exc)
 
 
 def format_last_active(value: datetime) -> str:
@@ -315,10 +307,8 @@ def generate_next_customer_id(db: Session) -> str:
 
     for result in db.query(Customer.customer_id).all():
         customer_id = result[0] if result else None
-
         if not customer_id:
             continue
-
         try:
             max_number = max(max_number, int(str(customer_id).split("-")[-1]))
         except ValueError:
