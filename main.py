@@ -37,10 +37,12 @@ app.add_middleware(
     allow_origins=[
         "https://witty-pond-0c214db00.7.azurestaticapps.net",
         "https://witty-pond-0c214db00-1.eastasia.7.azurestaticapps.net",
+        "https://witty-pond-0c214db00-dev.eastasia.7.azurestaticapps.net",
         "https://www.greenshare.ae",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
+    allow_origin_regex=r"https://.*\.azurestaticapps\.net",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
