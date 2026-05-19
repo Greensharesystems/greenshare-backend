@@ -342,6 +342,7 @@ def test_pdf_generation_uses_azure_safe_launch_and_closes_browser(monkeypatch: p
 	launch_calls: list[dict[str, object]] = []
 	page_calls: dict[str, object] = {}
 	browser_closed = False
+	monkeypatch.setattr("app.services.pdf_generation_service.platform.system", lambda: "Linux")
 
 	class FakePage:
 		def set_content(self, html: str, wait_until: str) -> None:
@@ -362,6 +363,8 @@ def test_pdf_generation_uses_azure_safe_launch_and_closes_browser(monkeypatch: p
 			browser_closed = True
 
 	class FakeChromium:
+		executable_path = "/playwright/chromium/chrome"
+
 		def launch(self, **kwargs: object) -> FakeBrowser:
 			launch_calls.append(kwargs)
 			return FakeBrowser()
@@ -388,6 +391,7 @@ def test_pdf_generation_uses_azure_safe_launch_and_closes_browser(monkeypatch: p
 	assert launch_calls == [
 		{
 			"headless": True,
+			"executable_path": "/playwright/chromium/chrome",
 			"args": [
 				"--no-sandbox",
 				"--disable-setuid-sandbox",

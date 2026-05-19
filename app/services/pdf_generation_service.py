@@ -1,5 +1,6 @@
 from collections.abc import Mapping
 import logging
+import platform
 from pathlib import Path
 import re
 from typing import Any
@@ -125,17 +126,10 @@ class PdfGenerationService:
 
 		try:
 			with sync_playwright() as p:
+				launch_options = self._build_browser_launch_options(p.chromium)
 				logger.info("Playwright browser launch started for template '%s'", template_path.name)
-				browser = p.chromium.launch(
-					headless=True,
-					args=[
-						"--no-sandbox",
-						"--disable-setuid-sandbox",
-						"--disable-dev-shm-usage",
-						"--disable-gpu",
-						"--single-process",
-					],
-				)
+				logger.info("Using Playwright Chromium executable at '%s'", launch_options["executable_path"])
+				browser = p.chromium.launch(**launch_options)
 				logger.info("Playwright browser launched successfully for template '%s'", template_path.name)
 
 				page = browser.new_page()
@@ -158,6 +152,24 @@ class PdfGenerationService:
 					logger.info("Playwright browser closed for template '%s'", template_path.name)
 				except Exception:
 					logger.exception("Failed to close Playwright browser for template '%s'", template_path.name)
+
+	def _build_browser_launch_options(self, browser_type: Any) -> dict[str, Any]:
+		if platform.system() == "Linux":
+			args = [
+				"--no-sandbox",
+				"--disable-setuid-sandbox",
+				"--disable-dev-shm-usage",
+				"--disable-gpu",
+				"--single-process",
+			]
+		else:
+			args = ["--disable-dev-shm-usage"]
+
+		return {
+			"headless": True,
+			"executable_path": browser_type.executable_path,
+			"args": args,
+		}
 
 	def _to_directory_uri(self, path: Path) -> str:
 		directory_uri = path.resolve().as_uri()
