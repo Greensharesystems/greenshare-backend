@@ -2,22 +2,16 @@ from collections.abc import Mapping
 import logging
 from pathlib import Path
 import re
-import subprocess
 import tempfile
 from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateNotFound, select_autoescape
+from playwright.sync_api import sync_playwright
 
 
 TEMPLATES_ROOT = Path(__file__).resolve().parent.parent / "templates"
 PDF_TEMPLATE_DIR = TEMPLATES_ROOT / "pdf"
 PDF_SHARED_STYLESHEET = PDF_TEMPLATE_DIR / "styles.css"
-BROWSER_CANDIDATES = (
-	Path("C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"),
-	Path("C:/Program Files/Microsoft/Edge/Application/msedge.exe"),
-	Path("C:/Program Files (x86)/Google/Chrome/Application/chrome.exe"),
-	Path("C:/Program Files/Google/Chrome/Application/chrome.exe"),
-)
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +22,10 @@ class PdfGenerationService:
 		templates_root: Path | None = None,
 		shared_stylesheet: Path | None = None,
 		environment: Environment | None = None,
-		browser_executable: Path | None = None,
 	) -> None:
 		self.templates_root = templates_root or TEMPLATES_ROOT
 		self.template_dir = self.templates_root / "pdf"
 		self.shared_stylesheet = shared_stylesheet or PDF_SHARED_STYLESHEET
-		self.browser_executable = browser_executable or self._find_browser_executable()
 		self.environment = environment or Environment(
 			loader=FileSystemLoader(str(self.templates_root)),
 			autoescape=select_autoescape(["html", "xml"]),
@@ -41,10 +33,13 @@ class PdfGenerationService:
 		)
 
 	def generate_pdf(self, template_name: str, context: Mapping[str, Any]) -> bytes:
+		logger.info("PDF generation requested for template '%s'", template_name)
 		template_filename = self._normalize_template_name(template_name)
 		template_path = self._get_template_path(template_filename)
 		self._validate_assets(template_path)
+		logger.info("Rendering HTML template: %s", template_filename)
 		rendered_html = self.render_template(template_filename, context)
+		logger.info("Template rendered successfully, preparing HTML document")
 		prepared_html = self._prepare_html_document(rendered_html, template_path)
 		return self._render_pdf_with_browser(prepared_html, template_path)
 
@@ -126,62 +121,34 @@ class PdfGenerationService:
 		return re.sub(r'(<(?:img|source)[^>]+src=["\'])([^"\']+)(["\'][^>]*>)', replace_source, rendered_html, flags=re.IGNORECASE)
 
 	def _render_pdf_with_browser(self, prepared_html: str, template_path: Path) -> bytes:
-		browser_executable = self._get_browser_executable()
+		logger.info("Starting Playwright PDF render for template '%s'", template_path.name)
 
 		with tempfile.TemporaryDirectory(prefix="greenshare-pdf-") as temp_dir_name:
 			temp_dir = Path(temp_dir_name)
 			html_output_path = temp_dir / template_path.name
-			pdf_output_path = temp_dir / f"{template_path.stem}.pdf"
-			profile_dir = temp_dir / "browser-profile"
-			profile_dir.mkdir(parents=True, exist_ok=True)
-
 			html_output_path.write_text(prepared_html, encoding="utf-8")
-			command = [
-				str(browser_executable),
-				"--headless=new",
-				"--disable-gpu",
-				"--no-first-run",
-				"--no-default-browser-check",
-				"--allow-file-access-from-files",
-				"--disable-features=msEdgePdfOcr,msPdfAccessibility",
-				f"--user-data-dir={profile_dir}",
-				"--no-pdf-header-footer",
-				f"--print-to-pdf={pdf_output_path}",
-				html_output_path.resolve().as_uri(),
-			]
 
-			result = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
-
-			if result.returncode != 0 or not pdf_output_path.is_file():
+			try:
+				with sync_playwright() as p:
+					logger.info("Launching Playwright Chromium browser")
+					browser = p.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
+					logger.info("Chromium browser launched successfully")
+					try:
+						page = browser.new_page()
+						html_uri = html_output_path.resolve().as_uri()
+						logger.info("Navigating to rendered HTML: %s", html_uri)
+						page.goto(html_uri, wait_until="networkidle")
+						logger.info("HTML loaded, generating PDF bytes")
+						pdf_bytes = page.pdf(format="A4", print_background=True)
+						logger.info("PDF generation succeeded (%d bytes)", len(pdf_bytes))
+						return pdf_bytes
+					finally:
+						browser.close()
+			except Exception as exc:
+				logger.exception("PDF generation failed for template '%s': %s", template_path.name, exc)
 				raise RuntimeError(
-					f"Failed to generate PDF from template '{template_path.name}'. {result.stderr.strip() or result.stdout.strip()}"
-				)
-
-			return pdf_output_path.read_bytes()
-
-	def _get_browser_executable(self) -> Path:
-		if self.browser_executable is None:
-			self.browser_executable = self._find_browser_executable()
-
-		if self.browser_executable is None:
-			raise RuntimeError(
-				"PDF generation requires a supported Edge or Chrome browser executable, but none was found. "
-				"Install a supported browser or configure the PDF generation environment before calling this endpoint."
-			)
-
-		return self.browser_executable
-
-	def _find_browser_executable(self) -> Path | None:
-		for candidate in BROWSER_CANDIDATES:
-			if candidate.is_file():
-				logger.info("Using browser executable for PDF generation: %s", candidate)
-				return candidate
-
-		logger.warning(
-			"No supported Edge or Chrome browser executable was found for PDF generation. "
-			"PDF endpoints will return an error until a supported browser is available."
-		)
-		return None
+					f"Failed to generate PDF from template '{template_path.name}'. {exc}"
+				) from exc
 
 	def _to_directory_uri(self, path: Path) -> str:
 		directory_uri = path.resolve().as_uri()

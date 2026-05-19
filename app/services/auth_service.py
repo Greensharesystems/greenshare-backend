@@ -18,6 +18,7 @@ def login_with_user_account(payload: LoginRequest, db: Session) -> LoginResponse
 		access_token=create_access_token(principal),
 		role=principal.role,
 		user_id=principal.identifier,
+		display_name=principal.displayName,
 		cid=principal.customerId,
 		geid=None,
 	)

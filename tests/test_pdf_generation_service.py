@@ -378,13 +378,12 @@ def test_render_circularity_certificate_template_supports_multi_linked_entries()
 	assert "Energy" in rendered_html
 
 
-def test_pdf_generation_defers_missing_browser_failure(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
-	caplog.set_level("WARNING")
-	monkeypatch.setattr(PdfGenerationService, "_find_browser_executable", lambda self: None)
+def test_pdf_generation_raises_on_playwright_launch_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+	def failing_sync_playwright():
+		raise RuntimeError("Playwright: Chromium executable does not exist at the given path.")
+
+	monkeypatch.setattr("app.services.pdf_generation_service.sync_playwright", failing_sync_playwright)
 	service = PdfGenerationService()
 
-	assert service.browser_executable is None
-	assert "No supported Edge or Chrome browser executable was found" in caplog.text
-
-	with pytest.raises(RuntimeError, match="PDF generation requires a supported Edge or Chrome browser executable"):
+	with pytest.raises(RuntimeError, match="Failed to generate PDF"):
 		service.generate_pdf("pdf/reception_note.html", build_reception_note_pdf_context())
