@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
@@ -8,6 +10,7 @@ from app.services import reception_note_service
 
 
 router = APIRouter(prefix="/reception-notes", tags=["reception-notes"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("", response_model=list[ReceptionNoteResponse])
@@ -44,7 +47,7 @@ def create_reception_note(
 
 @router.get("/{reception_note_id}/pdf/view")
 def view_reception_note_pdf(
-	reception_note_id: int,
+	reception_note_id: str,
 	db: Session = Depends(get_db),
 	current_user: AuthPrincipal = Depends(get_current_principal),
 ) -> Response:
@@ -53,7 +56,7 @@ def view_reception_note_pdf(
 
 @router.get("/{reception_note_id}/pdf/download")
 def download_reception_note_pdf(
-	reception_note_id: int,
+	reception_note_id: str,
 	db: Session = Depends(get_db),
 	current_user: AuthPrincipal = Depends(get_current_principal),
 ) -> Response:
@@ -61,7 +64,7 @@ def download_reception_note_pdf(
 
 
 def build_reception_note_pdf_response(
-	reception_note_id: int,
+	reception_note_id: str,
 	content_disposition: str,
 	db: Session,
 	current_user: AuthPrincipal,
@@ -70,6 +73,12 @@ def build_reception_note_pdf_response(
 		filename, pdf_bytes = reception_note_service.generate_reception_note_pdf(db, reception_note_id, current_user)
 	except ValueError as exc:
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+	except RuntimeError as exc:
+		logger.exception("Reception note PDF generation failed for '%s'", reception_note_id)
+		raise HTTPException(
+			status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+			detail="Failed to generate reception note PDF.",
+		) from exc
 
 	return Response(
 		content=pdf_bytes,

@@ -1,8 +1,15 @@
 from datetime import datetime
 
+import pytest
+from fastapi import HTTPException
+
 from app.api.reception_notes import download_reception_note_pdf, view_reception_note_pdf
 from app.core.auth import AuthPrincipal
+from app.models.circularity_certificate import CircularityCertificate
+from app.models.customer import Customer
+from app.models.reception_certificate import ReceptionCertificate
 from app.models.reception_note import ReceptionNote
+from app.models.user import User
 from app.services import reception_note_service
 
 
@@ -68,15 +75,15 @@ def test_view_reception_note_pdf_returns_inline_headers(monkeypatch) -> None:
 		customerId=None,
 	)
 
-	def fake_generate_reception_note_pdf(db, reception_note_id: int, current_principal: AuthPrincipal) -> tuple[str, bytes]:
+	def fake_generate_reception_note_pdf(db, reception_note_id: str, current_principal: AuthPrincipal) -> tuple[str, bytes]:
 		assert db is None
-		assert reception_note_id == 7
+		assert reception_note_id == "RNID-0001-0001"
 		assert current_principal == principal
 		return "RNID-0001-0001.pdf", b"%PDF-test"
 
 	monkeypatch.setattr(reception_note_service, "generate_reception_note_pdf", fake_generate_reception_note_pdf)
 
-	response = view_reception_note_pdf(7, db=None, current_user=principal)
+	response = view_reception_note_pdf("RNID-0001-0001", db=None, current_user=principal)
 
 	assert response.media_type == "application/pdf"
 	assert response.headers["content-disposition"] == 'inline; filename="RNID-0001-0001.pdf"'
@@ -93,16 +100,60 @@ def test_download_reception_note_pdf_returns_attachment_headers(monkeypatch) -> 
 		customerId=None,
 	)
 
-	def fake_generate_reception_note_pdf(db, reception_note_id: int, current_principal: AuthPrincipal) -> tuple[str, bytes]:
+	def fake_generate_reception_note_pdf(db, reception_note_id: str, current_principal: AuthPrincipal) -> tuple[str, bytes]:
 		assert db is None
-		assert reception_note_id == 7
+		assert reception_note_id == "RNID-0001-0001"
 		assert current_principal == principal
 		return "RNID-0001-0001.pdf", b"%PDF-test"
 
 	monkeypatch.setattr(reception_note_service, "generate_reception_note_pdf", fake_generate_reception_note_pdf)
 
-	response = download_reception_note_pdf(7, db=None, current_user=principal)
+	response = download_reception_note_pdf("RNID-0001-0001", db=None, current_user=principal)
 
 	assert response.media_type == "application/pdf"
 	assert response.headers["content-disposition"] == 'attachment; filename="RNID-0001-0001.pdf"'
 	assert response.body == b"%PDF-test"
+
+
+def test_view_reception_note_pdf_returns_not_found_for_unknown_rnid(monkeypatch) -> None:
+	principal = AuthPrincipal(
+		email="employee@example.com",
+		displayName="Employee User",
+		identifier="EMP-001",
+		accountType="user",
+		role="employee",
+		customerId=None,
+	)
+
+	def fake_generate_reception_note_pdf(db, reception_note_id: str, current_principal: AuthPrincipal) -> tuple[str, bytes]:
+		raise ValueError("That reception note could not be found.")
+
+	monkeypatch.setattr(reception_note_service, "generate_reception_note_pdf", fake_generate_reception_note_pdf)
+
+	with pytest.raises(HTTPException) as exc_info:
+		view_reception_note_pdf("RNID-9999-9999", db=None, current_user=principal)
+
+	assert exc_info.value.status_code == 404
+	assert exc_info.value.detail == "That reception note could not be found."
+
+
+def test_view_reception_note_pdf_returns_clean_internal_error(monkeypatch) -> None:
+	principal = AuthPrincipal(
+		email="employee@example.com",
+		displayName="Employee User",
+		identifier="EMP-001",
+		accountType="user",
+		role="employee",
+		customerId=None,
+	)
+
+	def fake_generate_reception_note_pdf(db, reception_note_id: str, current_principal: AuthPrincipal) -> tuple[str, bytes]:
+		raise RuntimeError("sensitive traceback text")
+
+	monkeypatch.setattr(reception_note_service, "generate_reception_note_pdf", fake_generate_reception_note_pdf)
+
+	with pytest.raises(HTTPException) as exc_info:
+		view_reception_note_pdf("RNID-0001-0001", db=None, current_user=principal)
+
+	assert exc_info.value.status_code == 500
+	assert exc_info.value.detail == "Failed to generate reception note PDF."

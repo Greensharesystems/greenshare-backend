@@ -89,8 +89,12 @@ def delete_reception_note(db: Session, rnid: str, principal: AuthPrincipal) -> N
 		raise
 
 
-def generate_reception_note_pdf(db: Session, reception_note_id: int, principal: AuthPrincipal) -> tuple[str, bytes]:
-	reception_note = reception_note_repository.get_reception_note_by_id(db, reception_note_id)
+def generate_reception_note_pdf(db: Session, reception_note_reference: int | str, principal: AuthPrincipal) -> tuple[str, bytes]:
+	if isinstance(reception_note_reference, str):
+		normalized_rnid = normalize_rnid(reception_note_reference)
+		reception_note = reception_note_repository.get_reception_note_by_rnid(db, normalized_rnid)
+	else:
+		reception_note = reception_note_repository.get_reception_note_by_id(db, reception_note_reference)
 
 	if reception_note is None or not can_access_reception_note(reception_note, principal):
 		raise ValueError("That reception note could not be found.")

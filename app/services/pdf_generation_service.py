@@ -122,36 +122,64 @@ class PdfGenerationService:
 
 	def _render_pdf_with_browser(self, prepared_html: str, template_path: Path) -> bytes:
 		logger.info("PDF request received for template '%s'", template_path.name)
+		playwright = None
 		browser = None
+		context = None
+		page = None
 
 		try:
-			with sync_playwright() as p:
-				launch_options = self._build_browser_launch_options(p.chromium)
-				logger.info("Playwright browser launch started for template '%s'", template_path.name)
-				logger.info("Using Playwright Chromium executable at '%s'", launch_options["executable_path"])
-				browser = p.chromium.launch(**launch_options)
-				logger.info("Playwright browser launched successfully for template '%s'", template_path.name)
+			playwright = sync_playwright().start()
+			launch_options = self._build_browser_launch_options(playwright.chromium)
+			logger.info("Playwright browser launch started for template '%s'", template_path.name)
+			logger.info("Using Playwright Chromium executable at '%s'", launch_options["executable_path"])
+			browser = playwright.chromium.launch(**launch_options)
+			logger.info("Playwright browser launched successfully for template '%s'", template_path.name)
 
-				page = browser.new_page()
-				logger.info("Loading rendered HTML content for template '%s'", template_path.name)
-				page.set_content(prepared_html, wait_until="networkidle")
-				logger.info("Page content loaded successfully for template '%s'", template_path.name)
+			context = browser.new_context()
+			logger.info("Playwright browser context created for template '%s'", template_path.name)
+			page = context.new_page()
+			logger.info("Playwright page created for template '%s'", template_path.name)
+			logger.info("Loading rendered HTML content for template '%s'", template_path.name)
+			page.set_content(prepared_html, wait_until="networkidle")
+			logger.info("Page content loaded successfully for template '%s'", template_path.name)
 
-				pdf_bytes = page.pdf(format="A4", print_background=True)
-				logger.info("PDF generated successfully for template '%s' (%d bytes)", template_path.name, len(pdf_bytes))
-				return pdf_bytes
+			pdf_bytes = page.pdf(format="A4", print_background=True)
+			logger.info("PDF generated successfully for template '%s' (%d bytes)", template_path.name, len(pdf_bytes))
+			return pdf_bytes
 		except Exception as exc:
 			logger.exception("PDF generation failed for template '%s'", template_path.name)
 			raise RuntimeError(
 				f"Failed to generate PDF from template '{template_path.name}'. {exc}"
 			) from exc
 		finally:
+			if page is not None:
+				try:
+					if not page.is_closed():
+						page.close()
+						logger.info("Playwright page closed for template '%s'", template_path.name)
+				except Exception:
+					logger.exception("Failed to close Playwright page for template '%s'", template_path.name)
+
+			if context is not None:
+				try:
+					context.close()
+					logger.info("Playwright browser context closed for template '%s'", template_path.name)
+				except Exception:
+					logger.exception("Failed to close Playwright browser context for template '%s'", template_path.name)
+
 			if browser is not None:
 				try:
 					browser.close()
 					logger.info("Playwright browser closed for template '%s'", template_path.name)
 				except Exception:
 					logger.exception("Failed to close Playwright browser for template '%s'", template_path.name)
+
+			if playwright is not None:
+				try:
+					playwright.stop()
+					logger.info("Playwright stopped for template '%s'", template_path.name)
+				except Exception:
+					logger.exception("Failed to stop Playwright for template '%s'", template_path.name)
 
 	def _build_browser_launch_options(self, browser_type: Any) -> dict[str, Any]:
 		if platform.system() == "Linux":

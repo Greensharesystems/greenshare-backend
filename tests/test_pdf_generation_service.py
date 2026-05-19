@@ -341,10 +341,16 @@ def test_generate_reception_note_pdf_returns_pdf_bytes() -> None:
 def test_pdf_generation_uses_azure_safe_launch_and_closes_browser(monkeypatch: pytest.MonkeyPatch) -> None:
 	launch_calls: list[dict[str, object]] = []
 	page_calls: dict[str, object] = {}
+	close_events: list[str] = []
 	browser_closed = False
+	context_closed = False
+	playwright_stopped = False
 	monkeypatch.setattr("app.services.pdf_generation_service.platform.system", lambda: "Linux")
 
 	class FakePage:
+		def __init__(self) -> None:
+			self.closed = False
+
 		def set_content(self, html: str, wait_until: str) -> None:
 			page_calls["html"] = html
 			page_calls["wait_until"] = wait_until
@@ -354,13 +360,30 @@ def test_pdf_generation_uses_azure_safe_launch_and_closes_browser(monkeypatch: p
 			page_calls["print_background"] = print_background
 			return b"%PDF-test-bytes"
 
-	class FakeBrowser:
+		def is_closed(self) -> bool:
+			return self.closed
+
+		def close(self) -> None:
+			self.closed = True
+			close_events.append("page")
+
+	class FakeContext:
 		def new_page(self) -> FakePage:
 			return FakePage()
 
 		def close(self) -> None:
+			nonlocal context_closed
+			context_closed = True
+			close_events.append("context")
+
+	class FakeBrowser:
+		def new_context(self) -> FakeContext:
+			return FakeContext()
+
+		def close(self) -> None:
 			nonlocal browser_closed
 			browser_closed = True
+			close_events.append("browser")
 
 	class FakeChromium:
 		executable_path = "/playwright/chromium/chrome"
@@ -372,16 +395,14 @@ def test_pdf_generation_uses_azure_safe_launch_and_closes_browser(monkeypatch: p
 	class FakePlaywright:
 		chromium = FakeChromium()
 
-	class FakePlaywrightContext:
-		def __enter__(self) -> FakePlaywright:
-			return FakePlaywright()
-
-		def __exit__(self, exc_type, exc, tb) -> bool:
-			return False
+		def stop(self) -> None:
+			nonlocal playwright_stopped
+			playwright_stopped = True
+			close_events.append("playwright")
 
 	monkeypatch.setattr(
 		"app.services.pdf_generation_service.sync_playwright",
-		lambda: FakePlaywrightContext(),
+		lambda: type("FakePlaywrightManager", (), {"start": staticmethod(lambda: FakePlaywright())})(),
 	)
 
 	service = PdfGenerationService()
@@ -405,7 +426,10 @@ def test_pdf_generation_uses_azure_safe_launch_and_closes_browser(monkeypatch: p
 	assert page_calls["format"] == "A4"
 	assert page_calls["print_background"] is True
 	assert isinstance(page_calls["html"], str)
+	assert context_closed is True
 	assert browser_closed is True
+	assert playwright_stopped is True
+	assert close_events == ["page", "context", "browser", "playwright"]
 
 
 def test_render_reception_note_template_supports_total_quantity() -> None:
