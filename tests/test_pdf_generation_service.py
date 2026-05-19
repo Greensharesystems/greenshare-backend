@@ -338,6 +338,72 @@ def test_generate_reception_note_pdf_returns_pdf_bytes() -> None:
 	assert len(pdf_bytes) > 1_000
 
 
+def test_pdf_generation_uses_azure_safe_launch_and_closes_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+	launch_calls: list[dict[str, object]] = []
+	page_calls: dict[str, object] = {}
+	browser_closed = False
+
+	class FakePage:
+		def set_content(self, html: str, wait_until: str) -> None:
+			page_calls["html"] = html
+			page_calls["wait_until"] = wait_until
+
+		def pdf(self, format: str, print_background: bool) -> bytes:
+			page_calls["format"] = format
+			page_calls["print_background"] = print_background
+			return b"%PDF-test-bytes"
+
+	class FakeBrowser:
+		def new_page(self) -> FakePage:
+			return FakePage()
+
+		def close(self) -> None:
+			nonlocal browser_closed
+			browser_closed = True
+
+	class FakeChromium:
+		def launch(self, **kwargs: object) -> FakeBrowser:
+			launch_calls.append(kwargs)
+			return FakeBrowser()
+
+	class FakePlaywright:
+		chromium = FakeChromium()
+
+	class FakePlaywrightContext:
+		def __enter__(self) -> FakePlaywright:
+			return FakePlaywright()
+
+		def __exit__(self, exc_type, exc, tb) -> bool:
+			return False
+
+	monkeypatch.setattr(
+		"app.services.pdf_generation_service.sync_playwright",
+		lambda: FakePlaywrightContext(),
+	)
+
+	service = PdfGenerationService()
+	pdf_bytes = service.generate_pdf("pdf/reception_note.html", build_reception_note_pdf_context())
+
+	assert pdf_bytes == b"%PDF-test-bytes"
+	assert launch_calls == [
+		{
+			"headless": True,
+			"args": [
+				"--no-sandbox",
+				"--disable-setuid-sandbox",
+				"--disable-dev-shm-usage",
+				"--disable-gpu",
+				"--single-process",
+			],
+		}
+	]
+	assert page_calls["wait_until"] == "networkidle"
+	assert page_calls["format"] == "A4"
+	assert page_calls["print_background"] is True
+	assert isinstance(page_calls["html"], str)
+	assert browser_closed is True
+
+
 def test_render_reception_note_template_supports_total_quantity() -> None:
 	service = PdfGenerationService()
 	rendered_html = service.render_template("pdf/reception_note.html", build_reception_note_pdf_context())

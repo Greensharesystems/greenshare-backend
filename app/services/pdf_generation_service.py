@@ -2,7 +2,6 @@ from collections.abc import Mapping
 import logging
 from pathlib import Path
 import re
-import tempfile
 from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateNotFound, select_autoescape
@@ -121,34 +120,44 @@ class PdfGenerationService:
 		return re.sub(r'(<(?:img|source)[^>]+src=["\'])([^"\']+)(["\'][^>]*>)', replace_source, rendered_html, flags=re.IGNORECASE)
 
 	def _render_pdf_with_browser(self, prepared_html: str, template_path: Path) -> bytes:
-		logger.info("Starting Playwright PDF render for template '%s'", template_path.name)
+		logger.info("PDF request received for template '%s'", template_path.name)
+		browser = None
 
-		with tempfile.TemporaryDirectory(prefix="greenshare-pdf-") as temp_dir_name:
-			temp_dir = Path(temp_dir_name)
-			html_output_path = temp_dir / template_path.name
-			html_output_path.write_text(prepared_html, encoding="utf-8")
+		try:
+			with sync_playwright() as p:
+				logger.info("Playwright browser launch started for template '%s'", template_path.name)
+				browser = p.chromium.launch(
+					headless=True,
+					args=[
+						"--no-sandbox",
+						"--disable-setuid-sandbox",
+						"--disable-dev-shm-usage",
+						"--disable-gpu",
+						"--single-process",
+					],
+				)
+				logger.info("Playwright browser launched successfully for template '%s'", template_path.name)
 
-			try:
-				with sync_playwright() as p:
-					logger.info("Launching Playwright Chromium browser")
-					browser = p.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
-					logger.info("Chromium browser launched successfully")
-					try:
-						page = browser.new_page()
-						html_uri = html_output_path.resolve().as_uri()
-						logger.info("Navigating to rendered HTML: %s", html_uri)
-						page.goto(html_uri, wait_until="networkidle")
-						logger.info("HTML loaded, generating PDF bytes")
-						pdf_bytes = page.pdf(format="A4", print_background=True)
-						logger.info("PDF generation succeeded (%d bytes)", len(pdf_bytes))
-						return pdf_bytes
-					finally:
-						browser.close()
-			except Exception as exc:
-				logger.exception("PDF generation failed for template '%s': %s", template_path.name, exc)
-				raise RuntimeError(
-					f"Failed to generate PDF from template '{template_path.name}'. {exc}"
-				) from exc
+				page = browser.new_page()
+				logger.info("Loading rendered HTML content for template '%s'", template_path.name)
+				page.set_content(prepared_html, wait_until="networkidle")
+				logger.info("Page content loaded successfully for template '%s'", template_path.name)
+
+				pdf_bytes = page.pdf(format="A4", print_background=True)
+				logger.info("PDF generated successfully for template '%s' (%d bytes)", template_path.name, len(pdf_bytes))
+				return pdf_bytes
+		except Exception as exc:
+			logger.exception("PDF generation failed for template '%s'", template_path.name)
+			raise RuntimeError(
+				f"Failed to generate PDF from template '{template_path.name}'. {exc}"
+			) from exc
+		finally:
+			if browser is not None:
+				try:
+					browser.close()
+					logger.info("Playwright browser closed for template '%s'", template_path.name)
+				except Exception:
+					logger.exception("Failed to close Playwright browser for template '%s'", template_path.name)
 
 	def _to_directory_uri(self, path: Path) -> str:
 		directory_uri = path.resolve().as_uri()
