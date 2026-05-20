@@ -69,6 +69,12 @@ def build_reception_note_pdf_response(
 	db: Session,
 	current_user: AuthPrincipal,
 ) -> Response:
+	logger.info(
+		"Reception note PDF route hit: reference=%s disposition=%s user=%s",
+		reception_note_id,
+		content_disposition,
+		current_user.identifier,
+	)
 	try:
 		filename, pdf_bytes = reception_note_service.generate_reception_note_pdf(db, reception_note_id, current_user)
 	except ValueError as exc:
@@ -80,6 +86,13 @@ def build_reception_note_pdf_response(
 			detail="Failed to generate reception note PDF.",
 		) from exc
 
+	logger.info(
+		"Reception note PDF generated successfully: reference=%s filename=%s bytes=%d disposition=%s",
+		reception_note_id,
+		filename,
+		len(pdf_bytes),
+		content_disposition,
+	)
 	return Response(
 		content=pdf_bytes,
 		media_type="application/pdf",

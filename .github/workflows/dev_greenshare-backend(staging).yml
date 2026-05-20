@@ -67,6 +67,14 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_4407A526F60E406398CE295EA9480508 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_1E68D08F6BF841FE8B7B53452ED6FC77 }}
 
+      - name: Configure staging startup command
+        run: >
+          az webapp config set
+          --resource-group greenshare-rg
+          --name greenshare-backend
+          --slot staging
+          --startup-file "python -m playwright install --with-deps chromium && gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app"
+
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp

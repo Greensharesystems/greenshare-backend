@@ -418,7 +418,6 @@ def test_pdf_generation_uses_azure_safe_launch_and_closes_browser(monkeypatch: p
 				"--disable-setuid-sandbox",
 				"--disable-dev-shm-usage",
 				"--disable-gpu",
-				"--single-process",
 			],
 		}
 	]

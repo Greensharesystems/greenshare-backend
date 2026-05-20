@@ -1,5 +1,6 @@
 from collections.abc import Mapping
 import logging
+import os
 import platform
 from pathlib import Path
 import re
@@ -14,6 +15,7 @@ PDF_TEMPLATE_DIR = TEMPLATES_ROOT / "pdf"
 PDF_SHARED_STYLESHEET = PDF_TEMPLATE_DIR / "styles.css"
 
 logger = logging.getLogger(__name__)
+PLAYWRIGHT_EXECUTABLE_ENV_VAR = "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"
 
 
 class PdfGenerationService:
@@ -33,7 +35,11 @@ class PdfGenerationService:
 		)
 
 	def generate_pdf(self, template_name: str, context: Mapping[str, Any]) -> bytes:
-		logger.info("PDF generation requested for template '%s'", template_name)
+		logger.info(
+			"PDF generation requested for template '%s' with context keys %s",
+			template_name,
+			sorted(context.keys()),
+		)
 		template_filename = self._normalize_template_name(template_name)
 		template_path = self._get_template_path(template_filename)
 		self._validate_assets(template_path)
@@ -130,6 +136,13 @@ class PdfGenerationService:
 		try:
 			playwright = sync_playwright().start()
 			launch_options = self._build_browser_launch_options(playwright.chromium)
+			logger.info(
+				"Playwright runtime diagnostics for template '%s': platform=%s, site=%s, browsers_path=%s",
+				template_path.name,
+				platform.platform(),
+				os.getenv("WEBSITE_SITE_NAME", ""),
+				os.getenv("PLAYWRIGHT_BROWSERS_PATH", ""),
+			)
 			logger.info("Playwright browser launch started for template '%s'", template_path.name)
 			logger.info("Using Playwright Chromium executable at '%s'", launch_options["executable_path"])
 			browser = playwright.chromium.launch(**launch_options)
@@ -182,20 +195,21 @@ class PdfGenerationService:
 					logger.exception("Failed to stop Playwright for template '%s'", template_path.name)
 
 	def _build_browser_launch_options(self, browser_type: Any) -> dict[str, Any]:
+		executable_path = os.getenv(PLAYWRIGHT_EXECUTABLE_ENV_VAR, "").strip() or browser_type.executable_path
+
 		if platform.system() == "Linux":
 			args = [
 				"--no-sandbox",
 				"--disable-setuid-sandbox",
 				"--disable-dev-shm-usage",
 				"--disable-gpu",
-				"--single-process",
 			]
 		else:
 			args = ["--disable-dev-shm-usage"]
 
 		return {
 			"headless": True,
-			"executable_path": browser_type.executable_path,
+			"executable_path": executable_path,
 			"args": args,
 		}
 

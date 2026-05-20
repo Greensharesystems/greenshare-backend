@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
@@ -12,6 +14,7 @@ from app.services import reception_certificate_service
 
 
 router = APIRouter(prefix="/reception-certificates", tags=["reception-certificates"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("", response_model=list[ReceptionCertificateResponse])
@@ -70,11 +73,34 @@ def build_reception_certificate_pdf_response(
 	db: Session,
 	current_user: AuthPrincipal,
 ) -> Response:
+	logger.info(
+		"Reception certificate PDF route hit: reference=%s disposition=%s user=%s",
+		reception_certificate_reference,
+		content_disposition,
+		current_user.identifier,
+	)
 	try:
 		filename, pdf_bytes = reception_certificate_service.generate_reception_certificate_pdf(db, reception_certificate_reference, current_user)
 	except ValueError as exc:
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+	except RuntimeError as exc:
+		logger.exception(
+			"Reception certificate PDF generation failed for '%s' with disposition '%s'",
+			reception_certificate_reference,
+			content_disposition,
+		)
+		raise HTTPException(
+			status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+			detail="Failed to generate reception certificate PDF.",
+		) from exc
 
+	logger.info(
+		"Reception certificate PDF generated successfully: reference=%s filename=%s bytes=%d disposition=%s",
+		reception_certificate_reference,
+		filename,
+		len(pdf_bytes),
+		content_disposition,
+	)
 	return Response(
 		content=pdf_bytes,
 		media_type="application/pdf",
