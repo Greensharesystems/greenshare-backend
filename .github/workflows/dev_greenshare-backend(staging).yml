@@ -82,17 +82,29 @@ jobs:
             --slot staging \
             --startup-file "bash startup.sh"
 
-          startup_command=$(az webapp config show \
-            --resource-group greenshare-rg \
-            --name greenshare-backend \
-            --slot staging \
-            --query appCommandLine \
-            --output tsv)
+          expected_command="bash startup.sh"
 
-          if [ "$startup_command" != "bash startup.sh" ]; then
-            echo "Unexpected staging startup command: $startup_command"
-            exit 1
-          fi
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            startup_command=$(az webapp config show \
+              --resource-group greenshare-rg \
+              --name greenshare-backend \
+              --slot staging \
+              --query appCommandLine \
+              --output tsv)
+
+            if [ "$startup_command" = "$expected_command" ]; then
+              echo "Staging startup command confirmed on attempt $attempt: $startup_command"
+              break
+            fi
+
+            if [ "$attempt" = "12" ]; then
+              echo "Unexpected staging startup command after retries: $startup_command"
+              exit 1
+            fi
+
+            echo "Startup command not updated yet on attempt $attempt: $startup_command"
+            sleep 5
+          done
 
       - name: Restart staging slot
         run: |
