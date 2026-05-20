@@ -5,10 +5,15 @@
 Set this in **Azure Portal → App Service → Configuration → General Settings → Startup Command**:
 
 ```bash
-python -m playwright install chromium && gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app
+bash startup.sh
 ```
 
-This installs the Playwright Chromium browser on each container start (required for PDF generation), then launches the application with Gunicorn/Uvicorn workers.
+The committed [startup.sh](startup.sh) script is the single startup entrypoint for Azure App Service staging. It:
+
+- installs the required Linux packages for Playwright Chromium, including `libglib2.0-0`
+- installs the Playwright Chromium browser into a controlled path
+- exports a stable Playwright runtime environment
+- launches the backend with Gunicorn on Linux and a local Uvicorn fallback on non-Linux hosts
 
 `gunicorn` is required in `requirements.txt` so Azure can launch the app with Uvicorn workers.
 
@@ -28,10 +33,20 @@ Ensure the following files are included in the deployment package:
 uvicorn main:app --reload
 ```
 
+## Local Startup Script Validation
+
+If you want to validate the same entrypoint used by Azure, run:
+
+```bash
+bash startup.sh
+```
+
+On Windows, run it from Git Bash. The script skips `apt-get` when it is unavailable and uses a local Uvicorn fallback instead of Gunicorn.
+
 ## After Deployment
 
 1. Restart the Azure App Service after deploying.
 2. Monitor the **Log Stream** (Azure Portal → App Service → Log Stream) to confirm:
-   - `python -m playwright install chromium` completes without errors.
+   - `startup.sh` logs the dependency and Chromium installation steps without errors.
    - The Gunicorn workers start successfully.
    - PDF generation log lines appear when PDFs are requested.
