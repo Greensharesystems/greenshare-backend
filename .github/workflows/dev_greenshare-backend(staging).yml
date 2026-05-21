@@ -571,28 +571,10 @@ jobs:
           exit 0
 
       - name: Fail deploy job if any diagnostic step failed
-        if: always()
+        if: ${{ always() && (steps.deploy-to-webapp.outcome != 'success' || steps.configure-staging-startup.outcome != 'success' || steps.restart-staging-slot.outcome != 'success' || steps.post-deployment-health.outcome != 'success') }}
         shell: bash
-        env:
-          DEPLOY_OUTCOME: ${{ steps.deploy-to-webapp.outcome }}
-          STARTUP_OUTCOME: ${{ steps.configure-staging-startup.outcome }}
-          RESTART_OUTCOME: ${{ steps.restart-staging-slot.outcome }}
-          HEALTH_OUTCOME: ${{ steps.post-deployment-health.outcome }}
         run: |
           set -euo pipefail
-
-          echo "Recorded outcome for deploy-to-webapp: ${DEPLOY_OUTCOME}"
-          echo "Recorded outcome for configure-staging-startup: ${STARTUP_OUTCOME}"
-          echo "Recorded outcome for restart-staging-slot: ${RESTART_OUTCOME}"
-          echo "Recorded outcome for post-deployment-health: ${HEALTH_OUTCOME}"
-
-          if [ "$DEPLOY_OUTCOME" = "success" ] && \
-             [ "$STARTUP_OUTCOME" = "success" ] && \
-             [ "$RESTART_OUTCOME" = "success" ] && \
-             [ "$HEALTH_OUTCOME" = "success" ]; then
-            echo "All staging deploy checks succeeded."
-            exit 0
-          fi
 
           echo "One or more staging deploy diagnostics reported failure."
           exit 1
