@@ -6,6 +6,19 @@ log() {
 	printf '[startup] %s %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$*"
 }
 
+run_timed_step() {
+	local step_name="$1"
+	shift
+
+	local started_at
+	started_at=$(date +%s)
+	log "START ${step_name}"
+	"$@"
+	local finished_at
+	finished_at=$(date +%s)
+	log "END ${step_name} duration=$((finished_at - started_at))s"
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
@@ -66,6 +79,12 @@ log "Startup script running from $SCRIPT_DIR"
 log "Using Python executable: $PYTHON_BIN"
 log "Using Playwright browsers path: $PLAYWRIGHT_BROWSERS_PATH"
 
+playwright_browser_installed() {
+	compgen -G "$PLAYWRIGHT_BROWSERS_PATH/chromium-*/chrome-linux*/chrome" >/dev/null 2>&1 \
+		|| compgen -G "$PLAYWRIGHT_BROWSERS_PATH/chromium-*/chrome-win*/chrome.exe" >/dev/null 2>&1 \
+		|| compgen -G "$PLAYWRIGHT_BROWSERS_PATH/chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium" >/dev/null 2>&1
+}
+
 install_linux_dependencies() {
 	if [[ "$(uname -s)" != "Linux" ]]; then
 		log "Skipping apt-get dependency installation on non-Linux host."
@@ -97,18 +116,35 @@ install_linux_dependencies() {
 		libatspi2.0-0
 		libgtk-3-0
 	)
+	local missing_packages=()
+	local package
+	for package in "${packages[@]}"; do
+		if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -qx 'install ok installed'; then
+			missing_packages+=("$package")
+		fi
+	done
+
+	if [[ ${#missing_packages[@]} -eq 0 ]]; then
+		log "Skipping apt-get dependency installation because all required packages are already installed."
+		return 0
+	fi
 
 	export DEBIAN_FRONTEND=noninteractive
-	log "Installing Playwright Linux dependencies with apt-get"
+	log "Installing missing Playwright Linux dependencies with apt-get: ${missing_packages[*]}"
 	apt-get update
-	apt-get install -y --no-install-recommends "${packages[@]}"
+	apt-get install -y --no-install-recommends "${missing_packages[@]}"
 	apt-get clean
 	rm -rf /var/lib/apt/lists/*
 }
 
 install_playwright_chromium() {
+	if playwright_browser_installed; then
+		log "Skipping Playwright Chromium installation because a cached browser already exists."
+		return 0
+	fi
+
 	log "Installing Playwright Chromium browser"
-	"$PYTHON_BIN" -m playwright install chromium
+	"$PYTHON_BIN" -m playwright install --no-shell chromium
 }
 
 start_server() {
@@ -125,12 +161,12 @@ start_server() {
 	exec "$PYTHON_BIN" -m uvicorn main:app --host "$host" --port "$port"
 }
 
-install_linux_dependencies
-install_playwright_chromium
+run_timed_step "install_linux_dependencies" install_linux_dependencies
+run_timed_step "install_playwright_chromium" install_playwright_chromium
 
 if [[ "${STARTUP_VALIDATE_ONLY:-0}" == "1" ]]; then
 	log "Validation-only mode requested; skipping application launch."
 	exit 0
 fi
 
-start_server
+run_timed_step "start_server" start_server
