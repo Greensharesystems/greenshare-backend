@@ -91,19 +91,37 @@ jobs:
             printf '%s' "$value"
           }
 
-          az webapp config set \
-            --resource-group greenshare-rg \
-            --name greenshare-backend \
-            --slot staging \
-            --startup-file "bash startup.sh" \
-            --only-show-errors \
-            --output none
-
           expected_command="bash startup.sh"
           expected_normalized=$(normalize_command "$expected_command")
           confirmed_startup_command_raw=""
           confirmed_startup_command_normalized=""
           confirmed_startup_command="false"
+
+          for attempt in 1 2 3 4 5; do
+            config_set_stderr_file=$(mktemp)
+            set +e
+            az webapp config set \
+              --resource-group greenshare-rg \
+              --name greenshare-backend \
+              --slot staging \
+              --startup-file "bash startup.sh" \
+              --only-show-errors \
+              --output none 2>"$config_set_stderr_file"
+            config_set_status=$?
+            set -e
+            config_set_stderr=$(cat "$config_set_stderr_file")
+            rm -f "$config_set_stderr_file"
+
+            echo "Config set attempt $attempt: exit_code=$config_set_status stderr=[$config_set_stderr]"
+
+            if [ "$config_set_status" -eq 0 ]; then
+              break
+            fi
+
+            if [ "$attempt" != "5" ]; then
+              sleep 5
+            fi
+          done
 
           for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
             startup_command_stderr_file=$(mktemp)
