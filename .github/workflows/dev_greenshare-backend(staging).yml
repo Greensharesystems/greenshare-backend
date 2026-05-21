@@ -206,49 +206,55 @@ jobs:
       - name: Post-deployment staging health check
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
-          staging_host=$(az webapp show \
-            --resource-group greenshare-rg \
-            --name greenshare-backend \
-            --slot staging \
-            --query defaultHostName \
-            --output tsv)
+          initial_wait_seconds=20
+          max_attempts=18
+          retry_interval_seconds=10
+          health_response_file=/tmp/greenshare-staging-health.json
 
-          if [ -z "$staging_host" ]; then
-            echo "Staging host lookup failed."
-            exit 1
-          fi
+          echo "Waiting ${initial_wait_seconds}s for App Service restart and warm-up before probing /health."
+          sleep "$initial_wait_seconds"
 
-          health_url="https://${staging_host}/health"
-          echo "Checking staging health endpoint: ${health_url}"
+          for attempt in $(seq 1 "$max_attempts"); do
+            attempt_started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            host_lookup_stderr_file=$(mktemp)
 
-            initial_wait_seconds=20
-            max_attempts=18
-            retry_interval_seconds=10
+            set +e
+            staging_host=$(az webapp show \
+              --resource-group greenshare-rg \
+              --name greenshare-backend \
+              --slot staging \
+              --query defaultHostName \
+              --output tsv 2>"$host_lookup_stderr_file")
+            host_lookup_status=$?
+            set -e
 
-            echo "Waiting ${initial_wait_seconds}s for App Service restart and warm-up before probing /health."
-            sleep "$initial_wait_seconds"
+            host_lookup_stderr=$(cat "$host_lookup_stderr_file")
+            rm -f "$host_lookup_stderr_file"
 
-            for attempt in $(seq 1 "$max_attempts"); do
-              attempt_started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-            status_code=$(curl --silent --show-error --location --output /tmp/greenshare-staging-health.json --write-out "%{http_code}" "$health_url" || true)
+            if [ "$host_lookup_status" -ne 0 ] || [ -z "$staging_host" ] || [ "$staging_host" = "null" ]; then
+              echo "Health check attempt ${attempt}/${max_attempts} at ${attempt_started_at}: host lookup failed exit_code=${host_lookup_status} stderr=[${host_lookup_stderr}]"
+            else
+              health_url="https://${staging_host}/health"
+              status_code=$(curl --silent --show-error --location --output "$health_response_file" --write-out "%{http_code}" "$health_url" || true)
 
-              echo "Health check attempt ${attempt}/${max_attempts} at ${attempt_started_at}: HTTP ${status_code}"
+              echo "Health check attempt ${attempt}/${max_attempts} at ${attempt_started_at}: url=${health_url} HTTP ${status_code}"
 
-            if [ "$status_code" = "200" ]; then
+              if [ "$status_code" = "200" ]; then
                 echo "Staging health check passed on attempt ${attempt}."
-              cat /tmp/greenshare-staging-health.json
-              exit 0
+                cat "$health_response_file"
+                exit 0
+              fi
             fi
 
-              if [ "$attempt" -lt "$max_attempts" ]; then
-                echo "Health endpoint not ready yet; waiting ${retry_interval_seconds}s before retry."
-                sleep "$retry_interval_seconds"
-              fi
+            if [ "$attempt" -lt "$max_attempts" ]; then
+              echo "Health endpoint not ready yet; waiting ${retry_interval_seconds}s before retry."
+              sleep "$retry_interval_seconds"
+            fi
           done
 
-            echo "Staging health check failed after ${max_attempts} attempts."
-          cat /tmp/greenshare-staging-health.json || true
+          echo "Staging health check failed after ${max_attempts} attempts."
+          cat "$health_response_file" || true
           exit 1
           
