@@ -96,6 +96,7 @@ jobs:
             --name greenshare-backend \
             --slot staging \
             --startup-file "bash startup.sh" \
+            --only-show-errors \
             --output none
 
           expected_command="bash startup.sh"
@@ -105,23 +106,27 @@ jobs:
           confirmed_startup_command="false"
 
           for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+            startup_command_stderr_file=$(mktemp)
             set +e
             startup_command_raw=$(az webapp config show \
               --resource-group greenshare-rg \
               --name greenshare-backend \
               --slot staging \
               --query appCommandLine \
-              --output tsv 2>&1)
+              --only-show-errors \
+              --output tsv 2>"$startup_command_stderr_file")
             show_status=$?
             set -e
+            startup_command_stderr=$(cat "$startup_command_stderr_file")
+            rm -f "$startup_command_stderr_file"
 
             startup_command_normalized=$(normalize_command "$startup_command_raw")
 
-            echo "Observed startup command on attempt $attempt: raw=[$startup_command_raw] normalized=[$startup_command_normalized] exit_code=$show_status"
+            echo "Observed startup command on attempt $attempt: raw=[$startup_command_raw] normalized=[$startup_command_normalized] stderr=[$startup_command_stderr] exit_code=$show_status"
 
             if [ "$show_status" -ne 0 ]; then
               if [ "$attempt" = "15" ]; then
-                echo "Failed to query staging startup command after retries: $startup_command_raw"
+                echo "Failed to query staging startup command after retries: stderr=[$startup_command_stderr] raw=[$startup_command_raw]"
                 exit 1
               fi
 
