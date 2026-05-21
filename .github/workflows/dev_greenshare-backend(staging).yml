@@ -79,6 +79,18 @@ jobs:
         run: |
           set -euo pipefail
 
+          normalize_command() {
+            local value="$1"
+
+            value=${value//$'\r'/}
+            value=${value//$'\n'/ }
+            value=$(printf '%s' "$value" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+            value=$(printf '%s' "$value" | sed -E "s/^[\"']+//; s/[\"']+$//")
+            value=$(printf '%s' "$value" | tr '\t' ' ' | sed -E 's/[[:space:]]+/ /g; s/^[[:space:]]+//; s/[[:space:]]+$//')
+
+            printf '%s' "$value"
+          }
+
           az webapp config set \
             --resource-group greenshare-rg \
             --name greenshare-backend \
@@ -87,10 +99,11 @@ jobs:
             --output none
 
           expected_command="bash startup.sh"
+          expected_normalized=$(normalize_command "$expected_command")
 
-          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
             set +e
-            startup_command=$(az webapp config show \
+            startup_command_raw=$(az webapp config show \
               --resource-group greenshare-rg \
               --name greenshare-backend \
               --slot staging \
@@ -99,32 +112,62 @@ jobs:
             show_status=$?
             set -e
 
-            startup_command=${startup_command//$'\r'/}
+            startup_command_normalized=$(normalize_command "$startup_command_raw")
+
+            echo "Observed startup command on attempt $attempt: raw=[$startup_command_raw] normalized=[$startup_command_normalized] exit_code=$show_status"
 
             if [ "$show_status" -ne 0 ]; then
-              if [ "$attempt" = "12" ]; then
-                echo "Failed to query staging startup command after retries: $startup_command"
+              if [ "$attempt" = "15" ]; then
+                echo "Failed to query staging startup command after retries: $startup_command_raw"
                 exit 1
               fi
 
-              echo "Startup command query failed on attempt $attempt: $startup_command"
+              echo "Startup command query failed on attempt $attempt; retrying."
               sleep 5
               continue
             fi
 
-            if [ "$startup_command" = "$expected_command" ]; then
-              echo "Staging startup command confirmed on attempt $attempt: $startup_command"
+            if [ -z "$startup_command_normalized" ] || [ "$startup_command_normalized" = "null" ]; then
+              if [ "$attempt" = "15" ]; then
+                echo "Startup command remained empty after retries. Last raw value: [$startup_command_raw]"
+                exit 1
+              fi
+
+              echo "Startup command was empty on attempt $attempt; retrying."
+              sleep 5
+              continue
+            fi
+
+            if [ "$startup_command_normalized" = "$expected_normalized" ]; then
+              echo "Staging startup command confirmed on attempt $attempt: $startup_command_normalized"
               break
             fi
 
-            if [ "$attempt" = "12" ]; then
-              echo "Unexpected staging startup command after retries: $startup_command"
+            if [ "$attempt" = "15" ]; then
+              echo "Unexpected staging startup command after retries: raw=[$startup_command_raw] normalized=[$startup_command_normalized] expected=[$expected_normalized]"
               exit 1
             fi
 
-            echo "Startup command not updated yet on attempt $attempt: $startup_command"
+            echo "Startup command not updated yet on attempt $attempt; retrying."
             sleep 5
           done
+
+          final_startup_command=$(az webapp config show \
+            --resource-group greenshare-rg \
+            --name greenshare-backend \
+            --slot staging \
+            --query appCommandLine \
+            --output tsv)
+          final_startup_command_normalized=$(normalize_command "$final_startup_command")
+
+          echo "Final staging startup command: raw=[$final_startup_command] normalized=[$final_startup_command_normalized]"
+
+          if [ "$final_startup_command_normalized" != "$expected_normalized" ]; then
+            echo "Final staging startup command mismatch."
+            exit 1
+          fi
+
+          sleep 5
 
       - name: Restart staging slot
         run: |
