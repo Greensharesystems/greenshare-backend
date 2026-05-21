@@ -223,19 +223,32 @@ jobs:
           health_url="https://${staging_host}/health"
           echo "Checking staging health endpoint: ${health_url}"
 
-          for attempt in 1 2 3 4 5 6; do
+            initial_wait_seconds=20
+            max_attempts=18
+            retry_interval_seconds=10
+
+            echo "Waiting ${initial_wait_seconds}s for App Service restart and warm-up before probing /health."
+            sleep "$initial_wait_seconds"
+
+            for attempt in $(seq 1 "$max_attempts"); do
+              attempt_started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
             status_code=$(curl --silent --show-error --location --output /tmp/greenshare-staging-health.json --write-out "%{http_code}" "$health_url" || true)
 
+              echo "Health check attempt ${attempt}/${max_attempts} at ${attempt_started_at}: HTTP ${status_code}"
+
             if [ "$status_code" = "200" ]; then
+                echo "Staging health check passed on attempt ${attempt}."
               cat /tmp/greenshare-staging-health.json
               exit 0
             fi
 
-            echo "Health check attempt ${attempt} returned ${status_code}; retrying."
-            sleep 10
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                echo "Health endpoint not ready yet; waiting ${retry_interval_seconds}s before retry."
+                sleep "$retry_interval_seconds"
+              fi
           done
 
-          echo "Staging health check failed."
+            echo "Staging health check failed after ${max_attempts} attempts."
           cat /tmp/greenshare-staging-health.json || true
           exit 1
           
