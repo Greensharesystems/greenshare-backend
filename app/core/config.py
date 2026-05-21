@@ -58,6 +58,18 @@ class Settings(BaseSettings):
 	model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 	database_url: str = Field(default="sqlite:///./greenshare.db", validation_alias="DATABASE_URL")
+	app_environment: str = Field(
+		default="development",
+		validation_alias=AliasChoices("APP_ENV", "ENVIRONMENT", "BACKEND_ENVIRONMENT"),
+	)
+	backend_log_level: str = Field(
+		default="INFO",
+		validation_alias=AliasChoices("LOG_LEVEL", "BACKEND_LOG_LEVEL"),
+	)
+	sqlalchemy_echo: bool = Field(
+		default=False,
+		validation_alias=AliasChoices("SQLALCHEMY_ECHO", "DB_ECHO"),
+	)
 	secret_key: str = Field(
 		default="greenshare-local-auth-secret",
 		validation_alias=AliasChoices("SECRET_KEY", "GREENSHARE_AUTH_SECRET"),
@@ -80,6 +92,9 @@ def get_settings() -> Settings:
 
 
 DATABASE_URL = get_settings().database_url
+APP_ENVIRONMENT = get_settings().app_environment
+BACKEND_LOG_LEVEL = get_settings().backend_log_level.upper()
+SQLALCHEMY_ECHO = get_settings().sqlalchemy_echo
 DEFAULT_USER_PASSWORD = "greenshare"
 PASSWORD_MIN_LENGTH = 8
 PASSWORD_HASH_ITERATIONS = 100_000

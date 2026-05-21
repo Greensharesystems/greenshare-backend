@@ -70,3 +70,27 @@ jobs:
           app-name: 'greenshare-backend'
           slot-name: 'Production'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_3CDAF01425254609A89A60268273A624 }}
+
+      - name: Post-deployment production health check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          health_url="https://api.greenshare.ae/health"
+          echo "Checking production health endpoint: ${health_url}"
+
+          for attempt in 1 2 3 4 5 6; do
+            status_code=$(curl --silent --show-error --location --output /tmp/greenshare-production-health.json --write-out "%{http_code}" "$health_url" || true)
+
+            if [ "$status_code" = "200" ]; then
+              cat /tmp/greenshare-production-health.json
+              exit 0
+            fi
+
+            echo "Health check attempt ${attempt} returned ${status_code}; retrying."
+            sleep 10
+          done
+
+          echo "Production health check failed."
+          cat /tmp/greenshare-production-health.json || true
+          exit 1

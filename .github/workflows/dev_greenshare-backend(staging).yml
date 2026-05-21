@@ -202,4 +202,40 @@ jobs:
             --resource-group greenshare-rg \
             --name greenshare-backend \
             --slot staging
+
+      - name: Post-deployment staging health check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          staging_host=$(az webapp show \
+            --resource-group greenshare-rg \
+            --name greenshare-backend \
+            --slot staging \
+            --query defaultHostName \
+            --output tsv)
+
+          if [ -z "$staging_host" ]; then
+            echo "Staging host lookup failed."
+            exit 1
+          fi
+
+          health_url="https://${staging_host}/health"
+          echo "Checking staging health endpoint: ${health_url}"
+
+          for attempt in 1 2 3 4 5 6; do
+            status_code=$(curl --silent --show-error --location --output /tmp/greenshare-staging-health.json --write-out "%{http_code}" "$health_url" || true)
+
+            if [ "$status_code" = "200" ]; then
+              cat /tmp/greenshare-staging-health.json
+              exit 0
+            fi
+
+            echo "Health check attempt ${attempt} returned ${status_code}; retrying."
+            sleep 10
+          done
+
+          echo "Staging health check failed."
+          cat /tmp/greenshare-staging-health.json || true
+          exit 1
           

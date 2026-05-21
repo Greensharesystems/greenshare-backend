@@ -35,17 +35,17 @@ class PdfGenerationService:
 		)
 
 	def generate_pdf(self, template_name: str, context: Mapping[str, Any]) -> bytes:
-		logger.info(
-			"PDF generation requested for template '%s' with context keys %s",
-			template_name,
-			sorted(context.keys()),
-		)
 		template_filename = self._normalize_template_name(template_name)
+		logger.info(
+			"pdf_generation_requested",
+			extra={
+				"template_name": template_filename,
+				"context_key_count": len(context),
+			},
+		)
 		template_path = self._get_template_path(template_filename)
 		self._validate_assets(template_path)
-		logger.info("Rendering HTML template: %s", template_filename)
 		rendered_html = self.render_template(template_filename, context)
-		logger.info("Template rendered successfully, preparing HTML document")
 		prepared_html = self._prepare_html_document(rendered_html, template_path)
 		return self._render_pdf_with_browser(prepared_html, template_path)
 
@@ -127,7 +127,6 @@ class PdfGenerationService:
 		return re.sub(r'(<(?:img|source)[^>]+src=["\'])([^"\']+)(["\'][^>]*>)', replace_source, rendered_html, flags=re.IGNORECASE)
 
 	def _render_pdf_with_browser(self, prepared_html: str, template_path: Path) -> bytes:
-		logger.info("PDF request received for template '%s'", template_path.name)
 		playwright = None
 		browser = None
 		context = None
@@ -137,30 +136,38 @@ class PdfGenerationService:
 			playwright = sync_playwright().start()
 			launch_options = self._build_browser_launch_options(playwright.chromium)
 			logger.info(
-				"Playwright runtime diagnostics for template '%s': platform=%s, site=%s, browsers_path=%s",
-				template_path.name,
-				platform.platform(),
-				os.getenv("WEBSITE_SITE_NAME", ""),
-				os.getenv("PLAYWRIGHT_BROWSERS_PATH", ""),
+				"pdf_browser_launch_started",
+				extra={
+					"template_name": template_path.name,
+					"platform": platform.platform(),
+					"site_name": os.getenv("WEBSITE_SITE_NAME", ""),
+					"browsers_path": os.getenv("PLAYWRIGHT_BROWSERS_PATH", ""),
+					"chromium_executable": Path(str(launch_options["executable_path"])).name,
+				},
 			)
-			logger.info("Playwright browser launch started for template '%s'", template_path.name)
-			logger.info("Using Playwright Chromium executable at '%s'", launch_options["executable_path"])
 			browser = playwright.chromium.launch(**launch_options)
-			logger.info("Playwright browser launched successfully for template '%s'", template_path.name)
 
 			context = browser.new_context()
-			logger.info("Playwright browser context created for template '%s'", template_path.name)
 			page = context.new_page()
-			logger.info("Playwright page created for template '%s'", template_path.name)
-			logger.info("Loading rendered HTML content for template '%s'", template_path.name)
 			page.set_content(prepared_html, wait_until="networkidle")
-			logger.info("Page content loaded successfully for template '%s'", template_path.name)
 
 			pdf_bytes = page.pdf(format="A4", print_background=True)
-			logger.info("PDF generated successfully for template '%s' (%d bytes)", template_path.name, len(pdf_bytes))
+			logger.info(
+				"pdf_generation_succeeded",
+				extra={
+					"template_name": template_path.name,
+					"size_bytes": len(pdf_bytes),
+				},
+			)
 			return pdf_bytes
 		except Exception as exc:
-			logger.exception("PDF generation failed for template '%s'", template_path.name)
+			logger.exception(
+				"pdf_generation_failed",
+				extra={
+					"template_name": template_path.name,
+					"error_type": type(exc).__name__,
+				},
+			)
 			raise RuntimeError(
 				f"Failed to generate PDF from template '{template_path.name}'. {exc}"
 			) from exc

@@ -2,9 +2,12 @@ import json
 from datetime import datetime
 import logging
 import re
+import time
+from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy import inspect, or_, text
 from sqlalchemy.orm import Session
@@ -17,6 +20,7 @@ from app.api.reception_certificates import router as reception_certificates_rout
 from app.api.reception_notes import router as reception_notes_router
 from app.api.users import router as users_router
 from app.core.config import BACKEND_CORS_ORIGIN_REGEX, BACKEND_CORS_ORIGINS, DEFAULT_USER_PASSWORD, hash_password
+from app.core.logging_config import configure_logging
 from app.db.database import Base, SessionLocal, engine
 from app.models.customer import Customer
 from app.models.circularity_certificate import CircularityCertificate
@@ -28,6 +32,8 @@ from app.services.customer_service import CUSTOMER_AUTH_DISABLED, NO_CUSTOMER_US
 
 SEED_ADMIN_EMAIL = "imran.g@zerowaste.ae"
 SEED_ADMIN_PASSWORD = "greenshare"
+
+configure_logging()
 
 app = FastAPI()
 logger = logging.getLogger(__name__)
@@ -51,6 +57,58 @@ app.include_router(dashboard_router)
 app.include_router(customer_dashboard_router)
 
 
+@app.middleware("http")
+async def log_request_context(request: Request, call_next):
+    request_id = request.headers.get("x-request-id") or str(uuid4())
+    started_at = time.perf_counter()
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        logger.exception(
+            "request_unhandled_error",
+            extra={
+                "request_id": request_id,
+                "method": request.method,
+                "path": request.url.path,
+                "duration_ms": duration_ms,
+            },
+        )
+        raise
+
+    duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+    log_payload = {
+        "request_id": request_id,
+        "method": request.method,
+        "path": request.url.path,
+        "status_code": response.status_code,
+        "duration_ms": duration_ms,
+    }
+    if request.url.path in {"/health", "/health/db"}:
+        logger.debug("request_completed", extra=log_payload)
+    elif request.url.path.startswith("/auth") or response.status_code >= 400:
+        log_method = logger.warning if response.status_code >= 400 else logger.info
+        log_method("request_completed", extra=log_payload)
+
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    log_method = logger.error if exc.status_code >= 500 else logger.warning
+    log_method(
+        "http_exception_raised",
+        extra={
+            "method": request.method,
+            "path": request.url.path,
+            "status_code": exc.status_code,
+        },
+    )
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
+
+
 @app.get("/")
 def read_root():
     return {"message": "Greenshare backend is running"}
@@ -58,6 +116,7 @@ def read_root():
 
 @app.get("/health")
 def health_check() -> dict[str, str]:
+    logger.debug("health_check_ok", extra={"path": "/health"})
     return {"status": "ok", "service": "greenshare-backend"}
 
 
@@ -73,17 +132,26 @@ def database_health_check() -> dict[str, str]:
             detail="Database connection failed. Verify Azure PostgreSQL connectivity and DATABASE_URL.",
         ) from exc
 
+    logger.debug("database_health_check_ok", extra={"path": "/health/db"})
     return {"status": "connected", "database": "azure_postgresql"}
 
 
 @app.on_event("startup")
 def startup_database() -> None:
+    logger.info("startup_database_begin")
     try:
         Base.metadata.create_all(bind=engine, checkfirst=True)
         ensure_password_schema()
         seed_admin_user()
     except Exception as exc:
-        print("DB init warning:", exc)
+        logger.exception(
+            "startup_database_warning",
+            extra={
+                "error_type": type(exc).__name__,
+            },
+        )
+    else:
+        logger.info("startup_database_complete")
 
 
 def seed_admin_user() -> None:
