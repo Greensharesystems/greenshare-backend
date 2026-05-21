@@ -208,9 +208,9 @@ jobs:
         run: |
           set -uo pipefail
 
-          initial_wait_seconds=20
-          max_attempts=18
-          retry_interval_seconds=10
+          initial_wait_seconds=45
+          max_attempts=24
+          retry_interval_seconds=15
           health_response_file=/tmp/greenshare-staging-health.json
 
           echo "Waiting ${initial_wait_seconds}s for App Service restart and warm-up before probing /health."
