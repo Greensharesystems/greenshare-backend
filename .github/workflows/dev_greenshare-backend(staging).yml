@@ -573,28 +573,27 @@ jobs:
       - name: Fail deploy job if any diagnostic step failed
         if: always()
         shell: bash
+        env:
+          DEPLOY_OUTCOME: ${{ steps.deploy-to-webapp.outcome }}
+          STARTUP_OUTCOME: ${{ steps.configure-staging-startup.outcome }}
+          RESTART_OUTCOME: ${{ steps.restart-staging-slot.outcome }}
+          HEALTH_OUTCOME: ${{ steps.post-deployment-health.outcome }}
         run: |
           set -euo pipefail
 
-          failure_detected="false"
+          echo "Recorded outcome for deploy-to-webapp: ${DEPLOY_OUTCOME}"
+          echo "Recorded outcome for configure-staging-startup: ${STARTUP_OUTCOME}"
+          echo "Recorded outcome for restart-staging-slot: ${RESTART_OUTCOME}"
+          echo "Recorded outcome for post-deployment-health: ${HEALTH_OUTCOME}"
 
-          for item in \
-            "deploy-to-webapp:${{ steps.deploy-to-webapp.outcome }}" \
-            "configure-staging-startup:${{ steps.configure-staging-startup.outcome }}" \
-            "restart-staging-slot:${{ steps.restart-staging-slot.outcome }}" \
-            "post-deployment-health:${{ steps.post-deployment-health.outcome }}"; do
-            step_name=${item%%:*}
-            step_outcome=${item#*:}
-
-            echo "Recorded outcome for ${step_name}: ${step_outcome}"
-
-            if [ "$step_outcome" != "success" ]; then
-              failure_detected="true"
-            fi
-          done
-
-          if [ "$failure_detected" = "true" ]; then
-            echo "One or more staging deploy diagnostics reported failure."
-            exit 1
+          if [ "$DEPLOY_OUTCOME" = "success" ] && \
+             [ "$STARTUP_OUTCOME" = "success" ] && \
+             [ "$RESTART_OUTCOME" = "success" ] && \
+             [ "$HEALTH_OUTCOME" = "success" ]; then
+            echo "All staging deploy checks succeeded."
+            exit 0
           fi
+
+          echo "One or more staging deploy diagnostics reported failure."
+          exit 1
           
