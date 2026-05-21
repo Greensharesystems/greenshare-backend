@@ -81,37 +81,51 @@ jobs:
         id: staging-predeploy-diagnostics
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
+          set +e
           app_state=$(az webapp show \
             --resource-group "$RESOURCE_GROUP" \
             --name "$APP_NAME" \
             --slot "$SLOT_NAME" \
             --query state \
             --output tsv)
+          app_state_status=$?
+
           startup_command=$(az webapp config show \
             --resource-group "$RESOURCE_GROUP" \
             --name "$APP_NAME" \
             --slot "$SLOT_NAME" \
             --query appCommandLine \
             --output tsv)
+          startup_command_status=$?
+
           staging_host=$(az webapp show \
             --resource-group "$RESOURCE_GROUP" \
             --name "$APP_NAME" \
             --slot "$SLOT_NAME" \
             --query defaultHostName \
             --output tsv)
+          staging_host_status=$?
 
           echo "Pre-deploy app state: [$app_state]"
+          echo "Pre-deploy app state exit code: [$app_state_status]"
           echo "Pre-deploy startup command: [$startup_command]"
+          echo "Pre-deploy startup command exit code: [$startup_command_status]"
           echo "Pre-deploy staging host: [$staging_host]"
+          echo "Pre-deploy staging host exit code: [$staging_host_status]"
 
           {
             echo "## Staging Deploy Diagnostics"
             echo "- Pre-deploy app state: \\`$app_state\\`"
+            echo "- Pre-deploy app state exit code: \\`$app_state_status\\`"
             echo "- Pre-deploy startup command: \\`$startup_command\\`"
+            echo "- Pre-deploy startup command exit code: \\`$startup_command_status\\`"
             echo "- Pre-deploy staging host: \\`$staging_host\\`"
+            echo "- Pre-deploy staging host exit code: \\`$staging_host_status\\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+          exit 0
 
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
@@ -126,42 +140,54 @@ jobs:
         id: staging-postdeploy-diagnostics
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
           echo "Command: azure/webapps-deploy@v3 app-name=$APP_NAME slot-name=$SLOT_NAME"
           echo "Deploy step outcome: ${{ steps.deploy-to-webapp.outcome }}"
           echo "Deploy step conclusion: ${{ steps.deploy-to-webapp.conclusion }}"
 
+          set +e
           app_state=$(az webapp show \
             --resource-group "$RESOURCE_GROUP" \
             --name "$APP_NAME" \
             --slot "$SLOT_NAME" \
             --query state \
             --output tsv)
+          app_state_status=$?
           startup_command=$(az webapp config show \
             --resource-group "$RESOURCE_GROUP" \
             --name "$APP_NAME" \
             --slot "$SLOT_NAME" \
             --query appCommandLine \
             --output tsv)
+          startup_command_status=$?
           staging_host=$(az webapp show \
             --resource-group "$RESOURCE_GROUP" \
             --name "$APP_NAME" \
             --slot "$SLOT_NAME" \
             --query defaultHostName \
             --output tsv)
+          staging_host_status=$?
 
           echo "Post-deploy app state: [$app_state]"
+          echo "Post-deploy app state exit code: [$app_state_status]"
           echo "Post-deploy startup command: [$startup_command]"
+          echo "Post-deploy startup command exit code: [$startup_command_status]"
           echo "Post-deploy staging host: [$staging_host]"
+          echo "Post-deploy staging host exit code: [$staging_host_status]"
 
           {
             echo "- Deploy action outcome: \\`${{ steps.deploy-to-webapp.outcome }}\\`"
             echo "- Deploy action conclusion: \\`${{ steps.deploy-to-webapp.conclusion }}\\`"
             echo "- Post-deploy app state: \\`$app_state\\`"
+            echo "- Post-deploy app state exit code: \\`$app_state_status\\`"
             echo "- Post-deploy startup command: \\`$startup_command\\`"
+            echo "- Post-deploy startup command exit code: \\`$startup_command_status\\`"
             echo "- Post-deploy staging host: \\`$staging_host\\`"
+            echo "- Post-deploy staging host exit code: \\`$staging_host_status\\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+          exit 0
 
       - name: Configure staging startup command
         if: always()
@@ -503,26 +529,30 @@ jobs:
         if: always()
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
+          set +e
           app_state=$(az webapp show \
             --resource-group "$RESOURCE_GROUP" \
             --name "$APP_NAME" \
             --slot "$SLOT_NAME" \
             --query state \
             --output tsv)
+          app_state_status=$?
           startup_command=$(az webapp config show \
             --resource-group "$RESOURCE_GROUP" \
             --name "$APP_NAME" \
             --slot "$SLOT_NAME" \
             --query appCommandLine \
             --output tsv)
+          startup_command_status=$?
           staging_host=$(az webapp show \
             --resource-group "$RESOURCE_GROUP" \
             --name "$APP_NAME" \
             --slot "$SLOT_NAME" \
             --query defaultHostName \
             --output tsv)
+          staging_host_status=$?
 
           {
             echo "### Final deploy job status"
@@ -531,9 +561,14 @@ jobs:
             echo "- Restart outcome: \\`${{ steps.restart-staging-slot.outcome }}\\`"
             echo "- Health check outcome: \\`${{ steps.post-deployment-health.outcome }}\\`"
             echo "- Final app state: \\`$app_state\\`"
+            echo "- Final app state exit code: \\`$app_state_status\\`"
             echo "- Final startup command: \\`$startup_command\\`"
+            echo "- Final startup command exit code: \\`$startup_command_status\\`"
             echo "- Final staging hostname: \\`$staging_host\\`"
+            echo "- Final staging hostname exit code: \\`$staging_host_status\\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+          exit 0
 
       - name: Fail deploy job if any diagnostic step failed
         if: always()
