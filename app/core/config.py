@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import os
 from functools import lru_cache
+from urllib.parse import urlparse
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -11,6 +12,46 @@ from app.core.env import load_environment
 
 
 load_environment()
+
+
+DEFAULT_CORS_ORIGINS = (
+	"https://witty-pond-0c214db00.7.azurestaticapps.net",
+	"https://witty-pond-0c214db00-1.eastasia.7.azurestaticapps.net",
+	"https://witty-pond-0c214db00-dev.eastasia.7.azurestaticapps.net",
+	"https://www.greenshare.ae",
+	"https://greenshare.ae",
+	"http://localhost:3000",
+	"http://127.0.0.1:3000",
+)
+
+
+def _normalize_origin(origin: str) -> str:
+	normalized_origin = origin.strip().strip('"').strip("'")
+	if not normalized_origin:
+		return ""
+
+	parsed_origin = urlparse(normalized_origin)
+	if parsed_origin.scheme not in {"http", "https"} or not parsed_origin.netloc:
+		return ""
+
+	return f"{parsed_origin.scheme}://{parsed_origin.netloc}"
+
+
+def parse_cors_origins(value: str | None, defaults: tuple[str, ...] = DEFAULT_CORS_ORIGINS) -> list[str]:
+	combined_origins = [*defaults]
+	if value:
+		combined_origins.extend(value.split(","))
+
+	normalized_origins: list[str] = []
+	seen_origins: set[str] = set()
+	for origin in combined_origins:
+		normalized_origin = _normalize_origin(origin)
+		if not normalized_origin or normalized_origin in seen_origins:
+			continue
+		seen_origins.add(normalized_origin)
+		normalized_origins.append(normalized_origin)
+
+	return normalized_origins
 
 
 class Settings(BaseSettings):
@@ -23,6 +64,14 @@ class Settings(BaseSettings):
 	)
 	algorithm: str = Field(default="HS256", validation_alias="ALGORITHM")
 	access_token_expire_minutes: int = Field(default=480, validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES")
+	cors_allowed_origins: str = Field(
+		default="",
+		validation_alias=AliasChoices("CORS_ALLOWED_ORIGINS", "ALLOWED_ORIGINS", "BACKEND_CORS_ORIGINS"),
+	)
+	cors_allow_origin_regex: str = Field(
+		default=r"https://.*\.azurestaticapps\.net",
+		validation_alias=AliasChoices("CORS_ALLOW_ORIGIN_REGEX", "ALLOWED_ORIGIN_REGEX"),
+	)
 
 
 @lru_cache(maxsize=1)
@@ -37,6 +86,8 @@ PASSWORD_HASH_ITERATIONS = 100_000
 AUTH_SECRET_KEY = get_settings().secret_key
 AUTH_ALGORITHM = get_settings().algorithm
 AUTH_TOKEN_EXPIRE_MINUTES = get_settings().access_token_expire_minutes
+BACKEND_CORS_ORIGINS = parse_cors_origins(get_settings().cors_allowed_origins)
+BACKEND_CORS_ORIGIN_REGEX = get_settings().cors_allow_origin_regex
 
 
 def hash_password(password: str) -> str:

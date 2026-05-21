@@ -16,7 +16,7 @@ from app.api.dashboard import customer_router as customer_dashboard_router, rout
 from app.api.reception_certificates import router as reception_certificates_router
 from app.api.reception_notes import router as reception_notes_router
 from app.api.users import router as users_router
-from app.core.config import DEFAULT_USER_PASSWORD, hash_password
+from app.core.config import BACKEND_CORS_ORIGIN_REGEX, BACKEND_CORS_ORIGINS, DEFAULT_USER_PASSWORD, hash_password
 from app.db.database import Base, SessionLocal, engine
 from app.models.customer import Customer
 from app.models.circularity_certificate import CircularityCertificate
@@ -34,15 +34,8 @@ logger = logging.getLogger(__name__)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://witty-pond-0c214db00.7.azurestaticapps.net",
-        "https://witty-pond-0c214db00-1.eastasia.7.azurestaticapps.net",
-        "https://witty-pond-0c214db00-dev.eastasia.7.azurestaticapps.net",
-        "https://www.greenshare.ae",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
-    allow_origin_regex=r"https://.*\.azurestaticapps\.net",
+    allow_origins=BACKEND_CORS_ORIGINS,
+    allow_origin_regex=BACKEND_CORS_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
