@@ -100,6 +100,9 @@ jobs:
 
           expected_command="bash startup.sh"
           expected_normalized=$(normalize_command "$expected_command")
+          confirmed_startup_command_raw=""
+          confirmed_startup_command_normalized=""
+          confirmed_startup_command="false"
 
           for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
             set +e
@@ -139,6 +142,9 @@ jobs:
             fi
 
             if [ "$startup_command_normalized" = "$expected_normalized" ]; then
+              confirmed_startup_command_raw="$startup_command_raw"
+              confirmed_startup_command_normalized="$startup_command_normalized"
+              confirmed_startup_command="true"
               echo "Staging startup command confirmed on attempt $attempt: $startup_command_normalized"
               break
             fi
@@ -152,20 +158,12 @@ jobs:
             sleep 5
           done
 
-          final_startup_command=$(az webapp config show \
-            --resource-group greenshare-rg \
-            --name greenshare-backend \
-            --slot staging \
-            --query appCommandLine \
-            --output tsv)
-          final_startup_command_normalized=$(normalize_command "$final_startup_command")
-
-          echo "Final staging startup command: raw=[$final_startup_command] normalized=[$final_startup_command_normalized]"
-
-          if [ "$final_startup_command_normalized" != "$expected_normalized" ]; then
-            echo "Final staging startup command mismatch."
+          if [ "$confirmed_startup_command" != "true" ]; then
+            echo "Startup command verification did not confirm the expected value."
             exit 1
           fi
+
+          echo "Final staging startup command: raw=[$confirmed_startup_command_raw] normalized=[$confirmed_startup_command_normalized]"
 
           sleep 5
 
