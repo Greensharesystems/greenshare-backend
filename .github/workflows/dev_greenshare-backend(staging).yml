@@ -75,22 +75,42 @@ jobs:
           slot-name: 'staging'
 
       - name: Configure staging startup command
+        shell: bash
         run: |
+          set -euo pipefail
+
           az webapp config set \
             --resource-group greenshare-rg \
             --name greenshare-backend \
             --slot staging \
-            --startup-file "bash startup.sh"
+            --startup-file "bash startup.sh" \
+            --output none
 
           expected_command="bash startup.sh"
 
           for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            set +e
             startup_command=$(az webapp config show \
               --resource-group greenshare-rg \
               --name greenshare-backend \
               --slot staging \
               --query appCommandLine \
-              --output tsv)
+              --output tsv 2>&1)
+            show_status=$?
+            set -e
+
+            startup_command=${startup_command//$'\r'/}
+
+            if [ "$show_status" -ne 0 ]; then
+              if [ "$attempt" = "12" ]; then
+                echo "Failed to query staging startup command after retries: $startup_command"
+                exit 1
+              fi
+
+              echo "Startup command query failed on attempt $attempt: $startup_command"
+              sleep 5
+              continue
+            fi
 
             if [ "$startup_command" = "$expected_command" ]; then
               echo "Staging startup command confirmed on attempt $attempt: $startup_command"
