@@ -212,6 +212,7 @@ jobs:
           confirmed_startup_command_raw=""
           confirmed_startup_command_normalized=""
           confirmed_startup_command="false"
+          config_set_succeeded="false"
           last_command="az webapp config set --resource-group $RESOURCE_GROUP --name $APP_NAME --slot $SLOT_NAME --startup-file bash startup.sh"
           last_exit_code=""
           last_stderr=""
@@ -238,20 +239,18 @@ jobs:
             echo "Config set attempt $attempt: exit_code=$config_set_status stderr=[$config_set_stderr]"
 
             if [ "$config_set_status" -eq 0 ]; then
+              config_set_succeeded="true"
               break
             fi
 
             if [ "$attempt" != "5" ]; then
               sleep 5
-            else
-              step_exit=1
             fi
           done
 
-          if [ "$step_exit" -eq 0 ]; then
-            for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-              last_command="az webapp config show --resource-group $RESOURCE_GROUP --name $APP_NAME --slot $SLOT_NAME --query appCommandLine --output tsv"
-              echo "Running command: $last_command"
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+            last_command="az webapp config show --resource-group $RESOURCE_GROUP --name $APP_NAME --slot $SLOT_NAME --query appCommandLine --output tsv"
+            echo "Running command: $last_command"
             startup_command_stderr_file=$(mktemp)
             set +e
             startup_command_raw=$(az webapp config show \
@@ -311,10 +310,9 @@ jobs:
 
             echo "Startup command not updated yet on attempt $attempt; retrying."
             sleep 5
-            done
-          fi
+          done
 
-          if [ "$step_exit" -eq 0 ] && [ "$confirmed_startup_command" != "true" ]; then
+          if [ "$confirmed_startup_command" != "true" ]; then
             echo "Startup command verification did not confirm the expected value."
             step_exit=1
           fi
@@ -341,6 +339,7 @@ jobs:
             echo "- Last exit code: \\`$last_exit_code\\`"
             echo "- Last stderr: \\`$last_stderr\\`"
             echo "- Expected startup command: \\`$expected_command\\`"
+            echo "- Config set reported success: \\`$config_set_succeeded\\`"
             echo "- Observed startup command raw: \\`$confirmed_startup_command_raw\\`"
             echo "- Observed startup command normalized: \\`$confirmed_startup_command_normalized\\`"
             echo "- Observed app state: \\`$observed_app_state\\`"
