@@ -459,9 +459,9 @@ jobs:
             else
               health_url="https://${staging_host}/health"
               last_health_url="$health_url"
-              curl_command="curl --silent --show-error --location --output $health_response_file --write-out %{http_code} $health_url"
+              curl_command="curl --silent --show-error --location --connect-timeout 10 --max-time 20 --output $health_response_file --write-out %{http_code} $health_url"
               echo "Running command: $curl_command"
-              status_code=$(curl --silent --show-error --location --output "$health_response_file" --write-out "%{http_code}" "$health_url")
+              status_code=$(curl --silent --show-error --location --connect-timeout 10 --max-time 20 --output "$health_response_file" --write-out "%{http_code}" "$health_url")
               curl_status=$?
               last_http_status="$status_code"
               last_curl_exit_code="$curl_status"
