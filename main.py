@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 import logging
+import os
 import re
 import time
 from uuid import uuid4
@@ -28,6 +29,7 @@ from app.models.reception_certificate import ReceptionCertificate
 from app.models.reception_note import ReceptionNote
 from app.models.user import User
 from app.services.customer_service import CUSTOMER_AUTH_DISABLED, NO_CUSTOMER_USER_ACTIVITY
+from app.services.pdf_generation_service import pdf_generation_service
 
 
 SEED_ADMIN_EMAIL = "imran.g@zerowaste.ae"
@@ -37,6 +39,11 @@ configure_logging()
 
 app = FastAPI()
 logger = logging.getLogger(__name__)
+
+
+def should_warm_pdf_browser() -> bool:
+    raw_value = os.getenv("PDF_BROWSER_WARMUP_ENABLED", "").strip().lower()
+    return raw_value in {"1", "true", "yes", "on"}
 
 app.add_middleware(
     CORSMiddleware,
@@ -152,6 +159,28 @@ def startup_database() -> None:
         )
     else:
         logger.info("startup_database_complete")
+
+    if should_warm_pdf_browser():
+        warmup_started_at = time.perf_counter()
+        try:
+            pdf_generation_service.warm_up_browser()
+        except Exception as exc:
+            logger.warning(
+                "startup_pdf_browser_warmup_failed",
+                extra={
+                    "process_id": os.getpid(),
+                    "error_type": type(exc).__name__,
+                    "duration_ms": round((time.perf_counter() - warmup_started_at) * 1000, 2),
+                },
+            )
+        else:
+            logger.info(
+                "startup_pdf_browser_warmup_completed",
+                extra={
+                    "process_id": os.getpid(),
+                    "duration_ms": round((time.perf_counter() - warmup_started_at) * 1000, 2),
+                },
+            )
 
 
 def seed_admin_user() -> None:

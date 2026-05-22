@@ -29,6 +29,7 @@ resolve_python_bin() {
 	fi
 
 	local candidates=(
+		"$SCRIPT_DIR/antenv/bin/python"
 		"$SCRIPT_DIR/venv/Scripts/python.exe"
 		"$SCRIPT_DIR/../.venv/Scripts/python.exe"
 		"$SCRIPT_DIR/.venv/Scripts/python.exe"
@@ -69,11 +70,14 @@ export PLAYWRIGHT_SKIP_BROWSER_GC="${PLAYWRIGHT_SKIP_BROWSER_GC:-1}"
 
 if [[ "$(uname -s)" == "Linux" ]]; then
 	export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-/home/site/wwwroot/.playwright}"
+	export PLAYWRIGHT_LINUX_DEB_CACHE_PATH="${PLAYWRIGHT_LINUX_DEB_CACHE_PATH:-/home/site/debian-packages/playwright}"
 else
 	export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$SCRIPT_DIR/.playwright}"
+	export PLAYWRIGHT_LINUX_DEB_CACHE_PATH="${PLAYWRIGHT_LINUX_DEB_CACHE_PATH:-$SCRIPT_DIR/.linux-deb-cache}"
 fi
 
 mkdir -p "$PLAYWRIGHT_BROWSERS_PATH"
+mkdir -p "$PLAYWRIGHT_LINUX_DEB_CACHE_PATH"
 
 log "Startup script running from $SCRIPT_DIR"
 log "Using Python executable: $PYTHON_BIN"
@@ -85,18 +89,9 @@ playwright_browser_installed() {
 		|| compgen -G "$PLAYWRIGHT_BROWSERS_PATH/chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium" >/dev/null 2>&1
 }
 
-install_linux_dependencies() {
-	if [[ "$(uname -s)" != "Linux" ]]; then
-		log "Skipping apt-get dependency installation on non-Linux host."
-		return 0
-	fi
-
-	if ! command -v apt-get >/dev/null 2>&1; then
-		log "Skipping apt-get dependency installation because apt-get is unavailable."
-		return 0
-	fi
-
-	local packages=(
+linux_dependency_packages=()
+if [[ "$(uname -s)" == "Linux" ]]; then
+	linux_dependency_packages=(
 		libglib2.0-0
 		libnss3
 		libnspr4
@@ -116,23 +111,101 @@ install_linux_dependencies() {
 		libatspi2.0-0
 		libgtk-3-0
 	)
-	local missing_packages=()
+fi
+
+linux_dependencies_installed() {
 	local package
-	for package in "${packages[@]}"; do
+	for package in "${linux_dependency_packages[@]}"; do
 		if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -qx 'install ok installed'; then
-			missing_packages+=("$package")
+			return 1
 		fi
 	done
 
-	if [[ ${#missing_packages[@]} -eq 0 ]]; then
+	return 0
+}
+
+cache_linux_dependency_archives() {
+	if [[ "$(uname -s)" != "Linux" ]]; then
+		return 0
+	fi
+
+	shopt -s nullglob
+	local archives=("$PLAYWRIGHT_LINUX_DEB_CACHE_PATH"/*.deb)
+	shopt -u nullglob
+
+	if [[ ${#archives[@]} -eq 0 ]]; then
+		log "No cached Debian packages were written to $PLAYWRIGHT_LINUX_DEB_CACHE_PATH during dependency install."
+		return 0
+	fi
+
+	mkdir -p "$PLAYWRIGHT_LINUX_DEB_CACHE_PATH"
+	printf '%s\n' "${linux_dependency_packages[@]}" > "$PLAYWRIGHT_LINUX_DEB_CACHE_PATH/packages.txt"
+	log "Cached ${#archives[@]} Debian packages for future Playwright dependency installs at $PLAYWRIGHT_LINUX_DEB_CACHE_PATH"
+}
+
+install_linux_dependencies_from_cache() {
+	if [[ "$(uname -s)" != "Linux" ]]; then
+		return 1
+	fi
+
+	if [[ ! -d "$PLAYWRIGHT_LINUX_DEB_CACHE_PATH" ]]; then
+		return 1
+	fi
+
+	shopt -s nullglob
+	local archives=("$PLAYWRIGHT_LINUX_DEB_CACHE_PATH"/*.deb)
+	shopt -u nullglob
+
+	if [[ ${#archives[@]} -eq 0 ]]; then
+		return 1
+	fi
+
+	export DEBIAN_FRONTEND=noninteractive
+	log "Installing Playwright Linux dependencies from cached Debian packages in $PLAYWRIGHT_LINUX_DEB_CACHE_PATH"
+	apt-get update
+	if ! apt-get install -y --no-install-recommends --no-download -o Dir::Cache::archives="$PLAYWRIGHT_LINUX_DEB_CACHE_PATH" "${linux_dependency_packages[@]}"; then
+		log "Cached Debian package restore was incomplete; falling back to apt-get network install."
+		return 1
+	fi
+
+	cache_linux_dependency_archives
+	apt-get clean
+	rm -rf /var/lib/apt/lists/*
+
+	if linux_dependencies_installed; then
+		log "Successfully restored Playwright Linux dependencies from cached Debian packages."
+		return 0
+	fi
+
+	log "Cached Debian package restore did not satisfy all required Playwright Linux dependencies."
+	return 1
+}
+
+install_linux_dependencies() {
+	if [[ "$(uname -s)" != "Linux" ]]; then
+		log "Skipping apt-get dependency installation on non-Linux host."
+		return 0
+	fi
+
+	if ! command -v apt-get >/dev/null 2>&1; then
+		log "Skipping apt-get dependency installation because apt-get is unavailable."
+		return 0
+	fi
+
+	if linux_dependencies_installed; then
 		log "Skipping apt-get dependency installation because all required packages are already installed."
 		return 0
 	fi
 
+	if install_linux_dependencies_from_cache; then
+		return 0
+	fi
+
 	export DEBIAN_FRONTEND=noninteractive
-	log "Installing missing Playwright Linux dependencies with apt-get: ${missing_packages[*]}"
+	log "Installing missing Playwright Linux dependencies with apt-get: ${linux_dependency_packages[*]}"
 	apt-get update
-	apt-get install -y --no-install-recommends "${missing_packages[@]}"
+	apt-get install -y --no-install-recommends -o Dir::Cache::archives="$PLAYWRIGHT_LINUX_DEB_CACHE_PATH" "${linux_dependency_packages[@]}"
+	cache_linux_dependency_archives
 	apt-get clean
 	rm -rf /var/lib/apt/lists/*
 }
@@ -153,8 +226,13 @@ start_server() {
 
 	if [[ "$(uname -s)" == "Linux" ]]; then
 		local workers="${GUNICORN_WORKERS:-4}"
-		log "Launching Gunicorn on ${host}:${port} with ${workers} workers"
-		exec "$PYTHON_BIN" -m gunicorn -w "$workers" -k uvicorn.workers.UvicornWorker --bind "${host}:${port}" main:app
+		local timeout="${GUNICORN_TIMEOUT:-120}"
+		log "Launching Gunicorn on ${host}:${port} with ${workers} workers and timeout=${timeout}s"
+		exec "$PYTHON_BIN" -m gunicorn main:app \
+			--workers "$workers" \
+			--worker-class uvicorn.workers.UvicornWorker \
+			--bind "${host}:${port}" \
+			--timeout "$timeout"
 	fi
 
 	log "Launching local Uvicorn fallback on ${host}:${port}"
