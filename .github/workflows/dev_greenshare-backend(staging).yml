@@ -400,16 +400,16 @@ jobs:
             echo "- Host lookup exit code: \\`$host_status\\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ "$restart_status" -ne 0 ]; then
-            exit "$restart_status"
-          fi
-
           if [ "$app_state_status" -ne 0 ]; then
             exit "$app_state_status"
           fi
 
           if [ "$host_status" -ne 0 ]; then
             exit "$host_status"
+          fi
+
+          if [ "$restart_status" -ne 0 ] && [ "$app_state" != "Running" ]; then
+            exit "$restart_status"
           fi
 
       - name: Post-deployment staging health check
