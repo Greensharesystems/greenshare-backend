@@ -59,6 +59,10 @@ jobs:
     permissions:
       id-token: write #This is required for requesting the JWT
       contents: read #This is required for actions/checkout
+    env:
+      RESOURCE_GROUP: greenshare-rg
+      APP_NAME: greenshare-backend
+      SLOT_NAME: staging
 
     steps:
       - name: Download artifact from build job
@@ -73,17 +77,299 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_4407A526F60E406398CE295EA9480508 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_1E68D08F6BF841FE8B7B53452ED6FC77 }}
 
+      - name: Capture pre-deploy staging diagnostics
+        id: staging-predeploy-diagnostics
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          set +e
+          app_state=$(az webapp show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APP_NAME" \
+            --slot "$SLOT_NAME" \
+            --query state \
+            --output tsv)
+          app_state_status=$?
+
+          startup_command=$(az webapp config show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APP_NAME" \
+            --slot "$SLOT_NAME" \
+            --query appCommandLine \
+            --output tsv)
+          startup_command_status=$?
+
+          staging_host=$(az webapp show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APP_NAME" \
+            --slot "$SLOT_NAME" \
+            --query defaultHostName \
+            --output tsv)
+          staging_host_status=$?
+
+          echo "Pre-deploy app state: [$app_state]"
+          echo "Pre-deploy app state exit code: [$app_state_status]"
+          echo "Pre-deploy startup command: [$startup_command]"
+          echo "Pre-deploy startup command exit code: [$startup_command_status]"
+          echo "Pre-deploy staging host: [$staging_host]"
+          echo "Pre-deploy staging host exit code: [$staging_host_status]"
+
+          {
+            echo "## Staging Deploy Diagnostics"
+            echo "- Pre-deploy app state: \\`$app_state\\`"
+            echo "- Pre-deploy app state exit code: \\`$app_state_status\\`"
+            echo "- Pre-deploy startup command: \\`$startup_command\\`"
+            echo "- Pre-deploy startup command exit code: \\`$startup_command_status\\`"
+            echo "- Pre-deploy staging host: \\`$staging_host\\`"
+            echo "- Pre-deploy staging host exit code: \\`$staging_host_status\\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit 0
+
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
+        continue-on-error: true
         with:
           app-name: 'greenshare-backend'
           slot-name: 'staging'
 
-      - name: Configure staging startup command
+      - name: Capture post-deploy action diagnostics
+        if: always()
+        id: staging-postdeploy-diagnostics
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
+
+          normalize_command() {
+            local value="$1"
+
+            value=${value//$'\r'/}
+            value=${value//$'\n'/ }
+            value=$(printf '%s' "$value" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+            value=$(printf '%s' "$value" | sed -E "s/^[\"']+//; s/[\"']+$//")
+            value=$(printf '%s' "$value" | tr '\t' ' ' | sed -E 's/[[:space:]]+/ /g; s/^[[:space:]]+//; s/[[:space:]]+$//')
+
+            printf '%s' "$value"
+          }
+
+          deploy_action_outcome="${{ steps.deploy-to-webapp.outcome }}"
+          deploy_action_conclusion="${{ steps.deploy-to-webapp.conclusion }}"
+          expected_startup_command="bash startup.sh"
+          expected_startup_command_normalized=$(normalize_command "$expected_startup_command")
+          kudu_available="false"
+          kudu_status="unavailable"
+          kudu_status_text=""
+          kudu_deployer=""
+          kudu_message=""
+          kudu_start_time=""
+          kudu_end_time=""
+          kudu_lookup_exit_code="not-run"
+          app_state=""
+          app_state_status=0
+          startup_command=""
+          startup_command_status=0
+          startup_command_normalized=""
+          staging_host=""
+          staging_host_status=0
+          health_response_file=$(mktemp)
+          health_initial_wait_seconds=10
+          health_max_attempts=6
+          health_retry_interval_seconds=10
+          last_http_status="not-run"
+          last_curl_exit_code="not-run"
+          last_health_url="unresolved"
+          authoritative_verified="false"
+          step_exit=0
+
+          echo "Command: azure/webapps-deploy@v3 app-name=$APP_NAME slot-name=$SLOT_NAME"
+          echo "Deploy step outcome: $deploy_action_outcome"
+          echo "Deploy step conclusion: $deploy_action_conclusion"
+
+          set +e
+          echo "Running command: az webapp deployment list-publishing-profiles --resource-group $RESOURCE_GROUP --name $APP_NAME --slot $SLOT_NAME"
+          publishing_profiles_json=$(az webapp deployment list-publishing-profiles \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APP_NAME" \
+            --slot "$SLOT_NAME" \
+            --output json)
+          publishing_profiles_status=$?
+
+          if [ "$publishing_profiles_status" -eq 0 ]; then
+            kudu_profile_lines=$(PROFILES_JSON="$publishing_profiles_json" python3 -c "import json, os, sys; profiles = json.loads(os.environ['PROFILES_JSON']); profile = next((item for item in profiles if item.get('publishMethod') == 'ZipDeploy'), None); profile or sys.exit(1); [print(profile.get(key, '') or '') for key in ('publishUrl', 'userName', 'userPWD')]")
+            kudu_profile_status=$?
+            if [ "$kudu_profile_status" -eq 0 ]; then
+              kudu_publish_url=$(printf '%s\n' "$kudu_profile_lines" | sed -n '1p')
+              kudu_username=$(printf '%s\n' "$kudu_profile_lines" | sed -n '2p')
+              kudu_password=$(printf '%s\n' "$kudu_profile_lines" | sed -n '3p')
+
+              if [ -n "$kudu_publish_url" ] && [ -n "$kudu_username" ] && [ -n "$kudu_password" ]; then
+                kudu_deployments_url="https://${kudu_publish_url%:443}/api/deployments"
+                echo "Running command: curl --silent --show-error --location --connect-timeout 10 --max-time 20 --user <redacted> $kudu_deployments_url"
+                kudu_response=$(curl --silent --show-error --location --connect-timeout 10 --max-time 20 --user "$kudu_username:$kudu_password" "$kudu_deployments_url")
+                kudu_lookup_exit_code=$?
+
+                if [ "$kudu_lookup_exit_code" -eq 0 ]; then
+                  kudu_details=$(KUDU_JSON="$kudu_response" python3 -c "import json, os; deployments = json.loads(os.environ['KUDU_JSON']); latest = deployments[0] if deployments else {}; [print(latest.get(key, '') if latest.get(key, '') is not None else '') for key in ('status', 'status_text', 'deployer', 'message', 'start_time', 'end_time')]")
+                  kudu_status=$(printf '%s\n' "$kudu_details" | sed -n '1p')
+                  kudu_status_text=$(printf '%s\n' "$kudu_details" | sed -n '2p')
+                  kudu_deployer=$(printf '%s\n' "$kudu_details" | sed -n '3p')
+                  kudu_message=$(printf '%s\n' "$kudu_details" | sed -n '4p')
+                  kudu_start_time=$(printf '%s\n' "$kudu_details" | sed -n '5p')
+                  kudu_end_time=$(printf '%s\n' "$kudu_details" | sed -n '6p')
+                  kudu_available="true"
+                fi
+              fi
+            else
+              kudu_lookup_exit_code=$kudu_profile_status
+            fi
+          else
+            kudu_lookup_exit_code=$publishing_profiles_status
+          fi
+
+          echo "Running command: az webapp show --resource-group $RESOURCE_GROUP --name $APP_NAME --slot $SLOT_NAME --query state --output tsv"
+          app_state=$(az webapp show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APP_NAME" \
+            --slot "$SLOT_NAME" \
+            --query state \
+            --output tsv)
+          app_state_status=$?
+
+          echo "Running command: az webapp config show --resource-group $RESOURCE_GROUP --name $APP_NAME --slot $SLOT_NAME --query appCommandLine --output tsv"
+          startup_command=$(az webapp config show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APP_NAME" \
+            --slot "$SLOT_NAME" \
+            --query appCommandLine \
+            --output tsv)
+          startup_command_status=$?
+          startup_command_normalized=$(normalize_command "$startup_command")
+
+          echo "Running command: az webapp show --resource-group $RESOURCE_GROUP --name $APP_NAME --slot $SLOT_NAME --query defaultHostName --output tsv"
+          staging_host=$(az webapp show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APP_NAME" \
+            --slot "$SLOT_NAME" \
+            --query defaultHostName \
+            --output tsv)
+          staging_host_status=$?
+
+          if [ "$staging_host_status" -eq 0 ] && [ -n "$staging_host" ] && [ "$staging_host" != "null" ]; then
+            echo "Waiting ${health_initial_wait_seconds}s before authoritative /health verification."
+            sleep "$health_initial_wait_seconds"
+
+            for attempt in $(seq 1 "$health_max_attempts"); do
+              health_url="https://${staging_host}/health"
+              last_health_url="$health_url"
+              echo "Running command: curl --silent --show-error --location --connect-timeout 10 --max-time 20 --output $health_response_file --write-out %{http_code} $health_url"
+              status_code=$(curl --silent --show-error --location --connect-timeout 10 --max-time 20 --output "$health_response_file" --write-out "%{http_code}" "$health_url")
+              curl_status=$?
+              last_http_status="$status_code"
+              last_curl_exit_code="$curl_status"
+
+              echo "Authoritative health attempt ${attempt}/${health_max_attempts}: url=${health_url} http_status=${status_code} curl_exit_code=${curl_status}"
+
+              if [ "$curl_status" -eq 0 ] && [ "$status_code" = "200" ]; then
+                break
+              fi
+
+              if [ "$attempt" -lt "$health_max_attempts" ]; then
+                sleep "$health_retry_interval_seconds"
+              fi
+            done
+          fi
+
+          echo "Post-deploy app state: [$app_state]"
+          echo "Post-deploy app state exit code: [$app_state_status]"
+          echo "Post-deploy startup command: [$startup_command]"
+          echo "Post-deploy startup command normalized: [$startup_command_normalized]"
+          echo "Post-deploy startup command exit code: [$startup_command_status]"
+          echo "Post-deploy staging host: [$staging_host]"
+          echo "Post-deploy staging host exit code: [$staging_host_status]"
+          echo "Latest Kudu deployment available: [$kudu_available]"
+          echo "Latest Kudu deployment status: [$kudu_status]"
+          echo "Latest Kudu deployment status text: [$kudu_status_text]"
+          echo "Latest Kudu deployer: [$kudu_deployer]"
+          echo "Latest Kudu message: [$kudu_message]"
+          echo "Latest Kudu start time: [$kudu_start_time]"
+          echo "Latest Kudu end time: [$kudu_end_time]"
+          echo "Latest Kudu lookup exit code: [$kudu_lookup_exit_code]"
+          echo "Last health URL: [$last_health_url]"
+          echo "Last HTTP status: [$last_http_status]"
+          echo "Last curl exit code: [$last_curl_exit_code]"
+
+          if [ "$kudu_available" = "true" ] && [ "$kudu_status" != "4" ]; then
+            step_exit=1
+          fi
+
+          if [ "$app_state_status" -ne 0 ] || [ "$app_state" != "Running" ]; then
+            step_exit=1
+          fi
+
+          if [ "$startup_command_status" -ne 0 ] || [ "$startup_command_normalized" != "$expected_startup_command_normalized" ]; then
+            step_exit=1
+          fi
+
+          if [ "$staging_host_status" -ne 0 ] || [ -z "$staging_host" ] || [ "$staging_host" = "null" ]; then
+            step_exit=1
+          fi
+
+          if [ "$last_curl_exit_code" != "0" ] || [ "$last_http_status" != "200" ]; then
+            step_exit=1
+          fi
+
+          if [ "$step_exit" -eq 0 ]; then
+            authoritative_verified="true"
+          fi
+
+          {
+            echo "### Authoritative post-deploy verification"
+            echo "- Deploy action outcome: \\`$deploy_action_outcome\\`"
+            echo "- Deploy action conclusion: \\`$deploy_action_conclusion\\`"
+            echo "- Latest Kudu deployment available: \\`$kudu_available\\`"
+            echo "- Latest Kudu deployment status: \\`$kudu_status\\`"
+            echo "- Latest Kudu deployment status text: \\`$kudu_status_text\\`"
+            echo "- Latest Kudu deployer: \\`$kudu_deployer\\`"
+            echo "- Latest Kudu message: \\`$kudu_message\\`"
+            echo "- Latest Kudu start time: \\`$kudu_start_time\\`"
+            echo "- Latest Kudu end time: \\`$kudu_end_time\\`"
+            echo "- Latest Kudu lookup exit code: \\`$kudu_lookup_exit_code\\`"
+            echo "- Post-deploy app state: \\`$app_state\\`"
+            echo "- Post-deploy app state exit code: \\`$app_state_status\\`"
+            echo "- Post-deploy startup command: \\`$startup_command\\`"
+            echo "- Post-deploy startup command normalized: \\`$startup_command_normalized\\`"
+            echo "- Post-deploy startup command exit code: \\`$startup_command_status\\`"
+            echo "- Post-deploy staging host: \\`$staging_host\\`"
+            echo "- Post-deploy staging host exit code: \\`$staging_host_status\\`"
+            echo "- Last health URL: \\`$last_health_url\\`"
+            echo "- Last HTTP status: \\`$last_http_status\\`"
+            echo "- Last curl exit code: \\`$last_curl_exit_code\\`"
+            echo "- Authoritative verification passed: \\`$authoritative_verified\\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          {
+            echo "authoritative_verified=$authoritative_verified"
+            echo "kudu_available=$kudu_available"
+            echo "kudu_status=$kudu_status"
+            echo "kudu_deployer=$kudu_deployer"
+            echo "slot_state=$app_state"
+            echo "startup_command=$startup_command"
+            echo "health_status=$last_http_status"
+            echo "health_url=$last_health_url"
+          } >> "$GITHUB_OUTPUT"
+
+          rm -f "$health_response_file"
+
+          exit "$step_exit"
+
+      - name: Configure staging startup command
+        if: always() && steps.staging-postdeploy-diagnostics.outcome != 'success'
+        id: configure-staging-startup
+        shell: bash
+        run: |
+          set -uo pipefail
 
           normalize_command() {
             local value="$1"
@@ -102,25 +388,34 @@ jobs:
           confirmed_startup_command_raw=""
           confirmed_startup_command_normalized=""
           confirmed_startup_command="false"
+          config_set_succeeded="false"
+          last_command="az webapp config set --resource-group $RESOURCE_GROUP --name $APP_NAME --slot $SLOT_NAME --startup-file bash startup.sh"
+          last_exit_code=""
+          last_stderr=""
+          observed_app_state=""
+          step_exit=0
 
           for attempt in 1 2 3 4 5; do
+            echo "Running command: $last_command"
             config_set_stderr_file=$(mktemp)
             set +e
             az webapp config set \
-              --resource-group greenshare-rg \
-              --name greenshare-backend \
-              --slot staging \
+              --resource-group "$RESOURCE_GROUP" \
+              --name "$APP_NAME" \
+              --slot "$SLOT_NAME" \
               --startup-file "bash startup.sh" \
               --only-show-errors \
               --output none 2>"$config_set_stderr_file"
             config_set_status=$?
-            set -e
             config_set_stderr=$(cat "$config_set_stderr_file")
             rm -f "$config_set_stderr_file"
+            last_exit_code="$config_set_status"
+            last_stderr="$config_set_stderr"
 
             echo "Config set attempt $attempt: exit_code=$config_set_status stderr=[$config_set_stderr]"
 
             if [ "$config_set_status" -eq 0 ]; then
+              config_set_succeeded="true"
               break
             fi
 
@@ -130,19 +425,22 @@ jobs:
           done
 
           for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+            last_command="az webapp config show --resource-group $RESOURCE_GROUP --name $APP_NAME --slot $SLOT_NAME --query appCommandLine --output tsv"
+            echo "Running command: $last_command"
             startup_command_stderr_file=$(mktemp)
             set +e
             startup_command_raw=$(az webapp config show \
-              --resource-group greenshare-rg \
-              --name greenshare-backend \
-              --slot staging \
+              --resource-group "$RESOURCE_GROUP" \
+              --name "$APP_NAME" \
+              --slot "$SLOT_NAME" \
               --query appCommandLine \
               --only-show-errors \
               --output tsv 2>"$startup_command_stderr_file")
             show_status=$?
-            set -e
             startup_command_stderr=$(cat "$startup_command_stderr_file")
             rm -f "$startup_command_stderr_file"
+            last_exit_code="$show_status"
+            last_stderr="$startup_command_stderr"
 
             startup_command_normalized=$(normalize_command "$startup_command_raw")
 
@@ -151,7 +449,8 @@ jobs:
             if [ "$show_status" -ne 0 ]; then
               if [ "$attempt" = "15" ]; then
                 echo "Failed to query staging startup command after retries: stderr=[$startup_command_stderr] raw=[$startup_command_raw]"
-                exit 1
+                step_exit=1
+                break
               fi
 
               echo "Startup command query failed on attempt $attempt; retrying."
@@ -162,7 +461,8 @@ jobs:
             if [ -z "$startup_command_normalized" ] || [ "$startup_command_normalized" = "null" ]; then
               if [ "$attempt" = "15" ]; then
                 echo "Startup command remained empty after retries. Last raw value: [$startup_command_raw]"
-                exit 1
+                step_exit=1
+                break
               fi
 
               echo "Startup command was empty on attempt $attempt; retrying."
@@ -180,7 +480,8 @@ jobs:
 
             if [ "$attempt" = "15" ]; then
               echo "Unexpected staging startup command after retries: raw=[$startup_command_raw] normalized=[$startup_command_normalized] expected=[$expected_normalized]"
-              exit 1
+              step_exit=1
+              break
             fi
 
             echo "Startup command not updated yet on attempt $attempt; retrying."
@@ -189,17 +490,259 @@ jobs:
 
           if [ "$confirmed_startup_command" != "true" ]; then
             echo "Startup command verification did not confirm the expected value."
-            exit 1
+            step_exit=1
           fi
 
+          last_command="az webapp show --resource-group $RESOURCE_GROUP --name $APP_NAME --slot $SLOT_NAME --query state --output tsv"
+          echo "Running command: $last_command"
+          set +e
+          observed_app_state=$(az webapp show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APP_NAME" \
+            --slot "$SLOT_NAME" \
+            --query state \
+            --output tsv)
+          observed_app_state_status=$?
+          last_exit_code="$observed_app_state_status"
+
           echo "Final staging startup command: raw=[$confirmed_startup_command_raw] normalized=[$confirmed_startup_command_normalized]"
+          echo "Observed app state after startup configuration: [$observed_app_state] exit_code=$observed_app_state_status"
+
+          {
+            echo "### Configure staging startup command"
+            echo "- Step outcome target: \\`${step_exit}\\`"
+            echo "- Last command: \\`$last_command\\`"
+            echo "- Last exit code: \\`$last_exit_code\\`"
+            echo "- Last stderr: \\`$last_stderr\\`"
+            echo "- Expected startup command: \\`$expected_command\\`"
+            echo "- Config set reported success: \\`$config_set_succeeded\\`"
+            echo "- Observed startup command raw: \\`$confirmed_startup_command_raw\\`"
+            echo "- Observed startup command normalized: \\`$confirmed_startup_command_normalized\\`"
+            echo "- Observed app state: \\`$observed_app_state\\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
           sleep 5
+          exit "$step_exit"
 
       - name: Restart staging slot
+        if: always() && steps.staging-postdeploy-diagnostics.outcome != 'success'
+        id: restart-staging-slot
+        shell: bash
         run: |
+          set -uo pipefail
+
+          restart_command="az webapp restart --resource-group $RESOURCE_GROUP --name $APP_NAME --slot $SLOT_NAME"
+          state_command="az webapp show --resource-group $RESOURCE_GROUP --name $APP_NAME --slot $SLOT_NAME --query state --output tsv"
+          host_command="az webapp show --resource-group $RESOURCE_GROUP --name $APP_NAME --slot $SLOT_NAME --query defaultHostName --output tsv"
+
+          echo "Running command: $restart_command"
+          set +e
           az webapp restart \
-            --resource-group greenshare-rg \
-            --name greenshare-backend \
-            --slot staging
-          
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APP_NAME" \
+            --slot "$SLOT_NAME"
+          restart_status=$?
+          echo "Restart command exit code: $restart_status"
+
+          echo "Running command: $state_command"
+          app_state=$(az webapp show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APP_NAME" \
+            --slot "$SLOT_NAME" \
+            --query state \
+            --output tsv)
+          app_state_status=$?
+          echo "Observed app state after restart: [$app_state] exit_code=$app_state_status"
+
+          echo "Running command: $host_command"
+          staging_host=$(az webapp show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APP_NAME" \
+            --slot "$SLOT_NAME" \
+            --query defaultHostName \
+            --output tsv)
+          host_status=$?
+          echo "Observed staging host after restart: [$staging_host] exit_code=$host_status"
+
+          {
+            echo "### Restart staging slot"
+            echo "- Command: \\`$restart_command\\`"
+            echo "- Restart exit code: \\`$restart_status\\`"
+            echo "- App state command: \\`$state_command\\`"
+            echo "- Observed app state: \\`$app_state\\`"
+            echo "- App state exit code: \\`$app_state_status\\`"
+            echo "- Host lookup command: \\`$host_command\\`"
+            echo "- Resolved staging hostname: \\`$staging_host\\`"
+            echo "- Host lookup exit code: \\`$host_status\\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$app_state_status" -ne 0 ]; then
+            exit "$app_state_status"
+          fi
+
+          if [ "$host_status" -ne 0 ]; then
+            exit "$host_status"
+          fi
+
+          if [ "$restart_status" -ne 0 ] && [ "$app_state" != "Running" ]; then
+            exit "$restart_status"
+          fi
+
+      - name: Post-deployment staging health check
+        if: always() && steps.staging-postdeploy-diagnostics.outcome != 'success'
+        id: post-deployment-health
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          initial_wait_seconds=45
+          max_attempts=24
+          retry_interval_seconds=15
+          health_response_file=/tmp/greenshare-staging-health.json
+          last_http_status="not-run"
+          last_curl_exit_code="not-run"
+          last_health_url="unresolved"
+          last_host_lookup_exit_code="not-run"
+          resolved_staging_host=""
+          observed_app_state=""
+          step_exit=0
+
+          echo "Waiting ${initial_wait_seconds}s for App Service restart and warm-up before probing /health."
+          sleep "$initial_wait_seconds"
+
+          for attempt in $(seq 1 "$max_attempts"); do
+            attempt_started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            host_lookup_stderr_file=$(mktemp)
+            host_lookup_command="az webapp show --resource-group $RESOURCE_GROUP --name $APP_NAME --slot $SLOT_NAME --query defaultHostName --output tsv"
+            echo "Running command: $host_lookup_command"
+
+            set +e
+            staging_host=$(az webapp show \
+              --resource-group "$RESOURCE_GROUP" \
+              --name "$APP_NAME" \
+              --slot "$SLOT_NAME" \
+              --query defaultHostName \
+              --output tsv 2>"$host_lookup_stderr_file")
+            host_lookup_status=$?
+
+            host_lookup_stderr=$(cat "$host_lookup_stderr_file")
+            rm -f "$host_lookup_stderr_file"
+            last_host_lookup_exit_code="$host_lookup_status"
+            resolved_staging_host="$staging_host"
+
+            if [ "$host_lookup_status" -ne 0 ] || [ -z "$staging_host" ] || [ "$staging_host" = "null" ]; then
+              echo "Health check attempt ${attempt}/${max_attempts} at ${attempt_started_at}: host lookup failed exit_code=${host_lookup_status} stderr=[${host_lookup_stderr}]"
+            else
+              health_url="https://${staging_host}/health"
+              last_health_url="$health_url"
+              curl_command="curl --silent --show-error --location --connect-timeout 10 --max-time 20 --output $health_response_file --write-out %{http_code} $health_url"
+              echo "Running command: $curl_command"
+              status_code=$(curl --silent --show-error --location --connect-timeout 10 --max-time 20 --output "$health_response_file" --write-out "%{http_code}" "$health_url")
+              curl_status=$?
+              last_http_status="$status_code"
+              last_curl_exit_code="$curl_status"
+
+              echo "Health check attempt ${attempt}/${max_attempts} at ${attempt_started_at}: url=${health_url} HTTP ${status_code} curl_exit_code=${curl_status}"
+
+              if [ "$curl_status" -eq 0 ] && [ "$status_code" = "200" ]; then
+                echo "Staging health check passed on attempt ${attempt}."
+                cat "$health_response_file"
+                break
+              fi
+            fi
+
+            if [ "$attempt" -lt "$max_attempts" ]; then
+              echo "Health endpoint not ready yet; waiting ${retry_interval_seconds}s before retry."
+              sleep "$retry_interval_seconds"
+            else
+              step_exit=1
+            fi
+          done
+
+          state_command="az webapp show --resource-group $RESOURCE_GROUP --name $APP_NAME --slot $SLOT_NAME --query state --output tsv"
+          echo "Running command: $state_command"
+          observed_app_state=$(az webapp show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APP_NAME" \
+            --slot "$SLOT_NAME" \
+            --query state \
+            --output tsv)
+          app_state_status=$?
+
+          if [ "$step_exit" -ne 0 ]; then
+            echo "Staging health check failed after ${max_attempts} attempts."
+            if [ -f "$health_response_file" ]; then
+              cat "$health_response_file"
+            fi
+          fi
+
+          {
+            echo "### Post-deployment staging health check"
+            echo "- Initial wait seconds: \\`$initial_wait_seconds\\`"
+            echo "- Retry interval seconds: \\`$retry_interval_seconds\\`"
+            echo "- Max attempts: \\`$max_attempts\\`"
+            echo "- Resolved staging hostname: \\`$resolved_staging_host\\`"
+            echo "- Host lookup exit code: \\`$last_host_lookup_exit_code\\`"
+            echo "- Last health URL: \\`$last_health_url\\`"
+            echo "- Last HTTP status: \\`$last_http_status\\`"
+            echo "- Last curl exit code: \\`$last_curl_exit_code\\`"
+            echo "- Observed app state: \\`$observed_app_state\\`"
+            echo "- App state exit code: \\`$app_state_status\\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$app_state_status" -ne 0 ]; then
+            exit "$app_state_status"
+          fi
+
+          exit "$step_exit"
+
+      - name: Final staging diagnostic summary
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          set +e
+          app_state=$(az webapp show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APP_NAME" \
+            --slot "$SLOT_NAME" \
+            --query state \
+            --output tsv)
+          app_state_status=$?
+          startup_command=$(az webapp config show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APP_NAME" \
+            --slot "$SLOT_NAME" \
+            --query appCommandLine \
+            --output tsv)
+          startup_command_status=$?
+          staging_host=$(az webapp show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APP_NAME" \
+            --slot "$SLOT_NAME" \
+            --query defaultHostName \
+            --output tsv)
+          staging_host_status=$?
+
+          {
+            echo "### Final deploy job status"
+            echo "- Deploy action outcome: \\`${{ steps.deploy-to-webapp.outcome }}\\`"
+            echo "- Authoritative verification outcome: \\`${{ steps.staging-postdeploy-diagnostics.outcome }}\\`"
+            echo "- Latest Kudu deployment available: \\`${{ steps.staging-postdeploy-diagnostics.outputs.kudu_available }}\\`"
+            echo "- Latest Kudu deployment status: \\`${{ steps.staging-postdeploy-diagnostics.outputs.kudu_status }}\\`"
+            echo "- Configure startup outcome: \\`${{ steps.configure-staging-startup.outcome }}\\`"
+            echo "- Restart outcome: \\`${{ steps.restart-staging-slot.outcome }}\\`"
+            echo "- Health check outcome: \\`${{ steps.post-deployment-health.outcome }}\\`"
+            echo "- Final app state: \\`$app_state\\`"
+            echo "- Final app state exit code: \\`$app_state_status\\`"
+            echo "- Final startup command: \\`$startup_command\\`"
+            echo "- Final startup command exit code: \\`$startup_command_status\\`"
+            echo "- Final staging hostname: \\`$staging_host\\`"
+            echo "- Final staging hostname exit code: \\`$staging_host_status\\`"
+            echo "- Final health status: \\`${{ steps.staging-postdeploy-diagnostics.outputs.health_status }}\\`"
+            echo "- Final health URL: \\`${{ steps.staging-postdeploy-diagnostics.outputs.health_url }}\\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit 0
+
