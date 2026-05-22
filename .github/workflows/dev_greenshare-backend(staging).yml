@@ -130,7 +130,6 @@ jobs:
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
-        continue-on-error: true
         with:
           app-name: 'greenshare-backend'
           slot-name: 'staging'
@@ -192,7 +191,6 @@ jobs:
       - name: Configure staging startup command
         if: always()
         id: configure-staging-startup
-        continue-on-error: true
         shell: bash
         run: |
           set -uo pipefail
@@ -354,7 +352,6 @@ jobs:
       - name: Restart staging slot
         if: always()
         id: restart-staging-slot
-        continue-on-error: true
         shell: bash
         run: |
           set -uo pipefail
@@ -419,7 +416,6 @@ jobs:
       - name: Post-deployment staging health check
         if: always()
         id: post-deployment-health
-        continue-on-error: true
         shell: bash
         run: |
           set -uo pipefail
@@ -570,12 +566,3 @@ jobs:
 
           exit 0
 
-      - name: Fail deploy job if any diagnostic step failed
-        if: ${{ always() && (steps.deploy-to-webapp.outcome != 'success' || steps.configure-staging-startup.outcome != 'success' || steps.restart-staging-slot.outcome != 'success' || steps.post-deployment-health.outcome != 'success') }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "One or more staging deploy diagnostics reported failure."
-          exit 1
-          
