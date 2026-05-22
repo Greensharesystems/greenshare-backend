@@ -1,6 +1,16 @@
+from concurrent.futures import ThreadPoolExecutor
+import logging
+import time
+
 import pytest
 
-from app.services.pdf_generation_service import PDF_SHARED_STYLESHEET, PdfGenerationService, generate_pdf
+from app.services.pdf_generation_service import PDF_SHARED_STYLESHEET, PdfGenerationService, generate_pdf, pdf_generation_service
+
+
+@pytest.fixture(autouse=True)
+def cleanup_shared_pdf_browser() -> None:
+	yield
+	pdf_generation_service.close_shared_browser()
 
 
 def build_reception_note_pdf_context() -> dict[str, str]:
@@ -407,6 +417,7 @@ def test_pdf_generation_uses_azure_safe_launch_and_closes_browser(monkeypatch: p
 
 	service = PdfGenerationService()
 	pdf_bytes = service.generate_pdf("pdf/reception_note.html", build_reception_note_pdf_context())
+	service.close_shared_browser()
 
 	assert pdf_bytes == b"%PDF-test-bytes"
 	assert launch_calls == [
@@ -429,6 +440,454 @@ def test_pdf_generation_uses_azure_safe_launch_and_closes_browser(monkeypatch: p
 	assert browser_closed is True
 	assert playwright_stopped is True
 	assert close_events == ["page", "context", "browser", "playwright"]
+
+
+def test_pdf_generation_reuses_shared_browser_between_requests(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+	launch_calls: list[dict[str, object]] = []
+	page_close_count = 0
+	context_close_count = 0
+	browser_close_count = 0
+	playwright_stop_count = 0
+	monkeypatch.setattr("app.services.pdf_generation_service.platform.system", lambda: "Linux")
+
+	class FakePage:
+		def __init__(self) -> None:
+			self.closed = False
+
+		def set_content(self, html: str, wait_until: str) -> None:
+			return None
+
+		def pdf(self, format: str, print_background: bool) -> bytes:
+			return b"%PDF-test-bytes"
+
+		def is_closed(self) -> bool:
+			return self.closed
+
+		def close(self) -> None:
+			nonlocal page_close_count
+			self.closed = True
+			page_close_count += 1
+
+	class FakeContext:
+		def new_page(self) -> FakePage:
+			return FakePage()
+
+		def close(self) -> None:
+			nonlocal context_close_count
+			context_close_count += 1
+
+	class FakeBrowser:
+		def is_connected(self) -> bool:
+			return True
+
+		def new_context(self) -> FakeContext:
+			return FakeContext()
+
+		def close(self) -> None:
+			nonlocal browser_close_count
+			browser_close_count += 1
+
+	class FakeChromium:
+		executable_path = "/playwright/chromium/chrome"
+
+		def launch(self, **kwargs: object) -> FakeBrowser:
+			launch_calls.append(kwargs)
+			return FakeBrowser()
+
+	class FakePlaywright:
+		chromium = FakeChromium()
+
+		def stop(self) -> None:
+			nonlocal playwright_stop_count
+			playwright_stop_count += 1
+
+	monkeypatch.setattr(
+		"app.services.pdf_generation_service.sync_playwright",
+		lambda: type("FakePlaywrightManager", (), {"start": staticmethod(lambda: FakePlaywright())})(),
+	)
+	caplog.set_level(logging.INFO, logger="app.services.pdf_generation_service")
+
+	service = PdfGenerationService()
+	first_pdf = service.generate_pdf("pdf/reception_note.html", build_reception_note_pdf_context())
+	second_pdf = service.generate_pdf("pdf/reception_note.html", build_reception_note_pdf_context())
+	service.close_shared_browser()
+
+	assert first_pdf == b"%PDF-test-bytes"
+	assert second_pdf == b"%PDF-test-bytes"
+	assert len(launch_calls) == 1
+	assert page_close_count == 2
+	assert context_close_count == 2
+	assert browser_close_count == 1
+	assert playwright_stop_count == 1
+	assert any(getattr(record, "browser_reused", None) is True for record in caplog.records)
+	assert all(getattr(record, "process_id", None) for record in caplog.records if record.name == "app.services.pdf_generation_service")
+
+
+def test_pdf_generation_applies_concurrency_limiter_and_logs_wait(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+	launch_calls = 0
+	monkeypatch.setattr("app.services.pdf_generation_service.platform.system", lambda: "Linux")
+	monkeypatch.setenv("PDF_MAX_CONCURRENT_PER_WORKER", "1")
+
+	class FakePage:
+		def __init__(self) -> None:
+			self.closed = False
+
+		def set_content(self, html: str, wait_until: str) -> None:
+			time.sleep(0.05)
+
+		def pdf(self, format: str, print_background: bool) -> bytes:
+			time.sleep(0.05)
+			return b"%PDF-test-bytes"
+
+		def is_closed(self) -> bool:
+			return self.closed
+
+		def close(self) -> None:
+			self.closed = True
+
+	class FakeContext:
+		def new_page(self) -> FakePage:
+			return FakePage()
+
+		def close(self) -> None:
+			return None
+
+	class FakeBrowser:
+		def is_connected(self) -> bool:
+			return True
+
+		def new_context(self) -> FakeContext:
+			return FakeContext()
+
+		def close(self) -> None:
+			return None
+
+	class FakeChromium:
+		executable_path = "/playwright/chromium/chrome"
+
+		def launch(self, **kwargs: object) -> FakeBrowser:
+			nonlocal launch_calls
+			launch_calls += 1
+			return FakeBrowser()
+
+	class FakePlaywright:
+		chromium = FakeChromium()
+
+		def stop(self) -> None:
+			return None
+
+	monkeypatch.setattr(
+		"app.services.pdf_generation_service.sync_playwright",
+		lambda: type("FakePlaywrightManager", (), {"start": staticmethod(lambda: FakePlaywright())})(),
+	)
+	caplog.set_level(logging.INFO, logger="app.services.pdf_generation_service")
+
+	service = PdfGenerationService()
+	with ThreadPoolExecutor(max_workers=2) as executor:
+		results = list(
+			executor.map(
+				lambda _: service.generate_pdf("pdf/reception_note.html", build_reception_note_pdf_context()),
+				range(2),
+			)
+		)
+	service.close_shared_browser()
+
+	assert results == [b"%PDF-test-bytes", b"%PDF-test-bytes"]
+	assert launch_calls == 1
+	wait_values = [
+		getattr(record, "limiter_wait_ms", None)
+		for record in caplog.records
+		if record.message == "pdf_render_slot_acquired"
+	]
+	assert len(wait_values) == 2
+	assert max(value for value in wait_values if value is not None) > 0
+
+
+def test_pdf_generation_warmup_launches_browser_once(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+	launch_calls = 0
+	monkeypatch.setattr("app.services.pdf_generation_service.platform.system", lambda: "Linux")
+
+	class FakeBrowser:
+		def is_connected(self) -> bool:
+			return True
+
+		def close(self) -> None:
+			return None
+
+	class FakeChromium:
+		executable_path = "/playwright/chromium/chrome"
+
+		def launch(self, **kwargs: object) -> FakeBrowser:
+			nonlocal launch_calls
+			launch_calls += 1
+			return FakeBrowser()
+
+	class FakePlaywright:
+		chromium = FakeChromium()
+
+		def stop(self) -> None:
+			return None
+
+	monkeypatch.setattr(
+		"app.services.pdf_generation_service.sync_playwright",
+		lambda: type("FakePlaywrightManager", (), {"start": staticmethod(lambda: FakePlaywright())})(),
+	)
+	caplog.set_level(logging.INFO, logger="app.services.pdf_generation_service")
+
+	service = PdfGenerationService()
+	service.warm_up_browser()
+	service.warm_up_browser()
+	service.close_shared_browser()
+
+	assert launch_calls == 1
+	warmup_records = [record for record in caplog.records if record.getMessage() == "pdf_browser_warmup_completed"]
+	assert len(warmup_records) == 2
+	assert all(getattr(record, "browser_generation", None) == 1 for record in warmup_records)
+
+
+def test_pdf_generation_recovers_by_relaunching_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+	launch_count = 0
+	browser_close_count = 0
+	playwright_stop_count = 0
+	monkeypatch.setattr("app.services.pdf_generation_service.platform.system", lambda: "Linux")
+
+	class FakePage:
+		def __init__(self) -> None:
+			self.closed = False
+
+		def set_content(self, html: str, wait_until: str) -> None:
+			return None
+
+		def pdf(self, format: str, print_background: bool) -> bytes:
+			return b"%PDF-recovered"
+
+		def is_closed(self) -> bool:
+			return self.closed
+
+		def close(self) -> None:
+			self.closed = True
+
+	class FakeContext:
+		def new_page(self) -> FakePage:
+			return FakePage()
+
+		def close(self) -> None:
+			return None
+
+	class RecoveringBrowser:
+		def __init__(self, should_fail: bool) -> None:
+			self.should_fail = should_fail
+			self.closed = False
+
+		def is_connected(self) -> bool:
+			return not self.closed and not self.should_fail
+
+		def new_context(self) -> FakeContext:
+			if self.should_fail:
+				self.closed = True
+				raise RuntimeError("Browser has been closed")
+			return FakeContext()
+
+		def close(self) -> None:
+			nonlocal browser_close_count
+			self.closed = True
+			browser_close_count += 1
+
+	class FakeChromium:
+		executable_path = "/playwright/chromium/chrome"
+
+		def launch(self, **kwargs: object) -> RecoveringBrowser:
+			nonlocal launch_count
+			launch_count += 1
+			return RecoveringBrowser(should_fail=launch_count == 1)
+
+	class FakePlaywright:
+		chromium = FakeChromium()
+
+		def stop(self) -> None:
+			nonlocal playwright_stop_count
+			playwright_stop_count += 1
+
+	monkeypatch.setattr(
+		"app.services.pdf_generation_service.sync_playwright",
+		lambda: type("FakePlaywrightManager", (), {"start": staticmethod(lambda: FakePlaywright())})(),
+	)
+
+	service = PdfGenerationService()
+	pdf_bytes = service.generate_pdf("pdf/reception_note.html", build_reception_note_pdf_context())
+	service.close_shared_browser()
+
+	assert pdf_bytes == b"%PDF-recovered"
+	assert launch_count == 2
+	assert browser_close_count >= 2
+	assert playwright_stop_count >= 2
+
+
+def test_pdf_generation_supports_repeated_concurrent_requests_with_shared_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+	launch_count = 0
+	context_count = 0
+	page_count = 0
+	import threading
+
+	counters_lock = threading.Lock()
+	monkeypatch.setattr("app.services.pdf_generation_service.platform.system", lambda: "Linux")
+
+	class FakePage:
+		def __init__(self) -> None:
+			self.closed = False
+
+		def set_content(self, html: str, wait_until: str) -> None:
+			return None
+
+		def pdf(self, format: str, print_background: bool) -> bytes:
+			return b"%PDF-concurrent"
+
+		def is_closed(self) -> bool:
+			return self.closed
+
+		def close(self) -> None:
+			self.closed = True
+
+	class FakeContext:
+		def new_page(self) -> FakePage:
+			nonlocal page_count
+			with counters_lock:
+				page_count += 1
+			return FakePage()
+
+		def close(self) -> None:
+			return None
+
+	class FakeBrowser:
+		def is_connected(self) -> bool:
+			return True
+
+		def new_context(self) -> FakeContext:
+			nonlocal context_count
+			with counters_lock:
+				context_count += 1
+			return FakeContext()
+
+		def close(self) -> None:
+			return None
+
+	class FakeChromium:
+		executable_path = "/playwright/chromium/chrome"
+
+		def launch(self, **kwargs: object) -> FakeBrowser:
+			nonlocal launch_count
+			with counters_lock:
+				launch_count += 1
+			return FakeBrowser()
+
+	class FakePlaywright:
+		chromium = FakeChromium()
+
+		def stop(self) -> None:
+			return None
+
+	monkeypatch.setattr(
+		"app.services.pdf_generation_service.sync_playwright",
+		lambda: type("FakePlaywrightManager", (), {"start": staticmethod(lambda: FakePlaywright())})(),
+	)
+
+	service = PdfGenerationService()
+
+	with ThreadPoolExecutor(max_workers=4) as executor:
+		results = list(
+			executor.map(
+				lambda _: service.generate_pdf("pdf/reception_note.html", build_reception_note_pdf_context()),
+				range(8),
+			)
+		)
+
+	service.close_shared_browser()
+
+	assert results == [b"%PDF-concurrent"] * 8
+	assert launch_count == 1
+	assert context_count == 8
+	assert page_count == 8
+
+
+def test_pdf_generation_reuses_shared_browser_on_dedicated_render_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+	launch_thread_ids: list[int] = []
+	render_thread_ids: list[int] = []
+	monkeypatch.setattr("app.services.pdf_generation_service.platform.system", lambda: "Linux")
+	monkeypatch.setenv("PDF_MAX_CONCURRENT_PER_WORKER", "1")
+
+	class FakePage:
+		def __init__(self) -> None:
+			self.closed = False
+
+		def set_content(self, html: str, wait_until: str) -> None:
+			return None
+
+		def pdf(self, format: str, print_background: bool) -> bytes:
+			return b"%PDF-thread-safe"
+
+		def is_closed(self) -> bool:
+			return self.closed
+
+		def close(self) -> None:
+			self.closed = True
+
+	class FakeContext:
+		def new_page(self) -> FakePage:
+			return FakePage()
+
+		def close(self) -> None:
+			return None
+
+	class FakeBrowser:
+		def __init__(self, launch_thread_id: int) -> None:
+			self.launch_thread_id = launch_thread_id
+
+		def is_connected(self) -> bool:
+			return True
+
+		def new_context(self) -> FakeContext:
+			current_thread_id = threading.get_ident()
+			render_thread_ids.append(current_thread_id)
+			assert current_thread_id == self.launch_thread_id
+			return FakeContext()
+
+		def close(self) -> None:
+			return None
+
+	class FakeChromium:
+		executable_path = "/playwright/chromium/chrome"
+
+		def launch(self, **kwargs: object) -> FakeBrowser:
+			launch_thread_id = threading.get_ident()
+			launch_thread_ids.append(launch_thread_id)
+			return FakeBrowser(launch_thread_id)
+
+	class FakePlaywright:
+		chromium = FakeChromium()
+
+		def stop(self) -> None:
+			return None
+
+	monkeypatch.setattr(
+		"app.services.pdf_generation_service.sync_playwright",
+		lambda: type("FakePlaywrightManager", (), {"start": staticmethod(lambda: FakePlaywright())})(),
+	)
+
+	service = PdfGenerationService()
+
+	with ThreadPoolExecutor(max_workers=2) as executor:
+		results = list(
+			executor.map(
+				lambda _: service.generate_pdf("pdf/reception_note.html", build_reception_note_pdf_context()),
+				range(2),
+			)
+		)
+
+	service.close_shared_browser()
+
+	assert results == [b"%PDF-thread-safe", b"%PDF-thread-safe"]
+	assert len(set(launch_thread_ids)) == 1
+	assert set(render_thread_ids) == set(launch_thread_ids)
 
 
 def test_render_reception_note_template_supports_total_quantity() -> None:
