@@ -46,10 +46,17 @@ logger = logging.getLogger(__name__)
 PLAYWRIGHT_EXECUTABLE_ENV_VAR = "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"
 PDF_MAX_CONCURRENT_PER_WORKER_ENV_VAR = "PDF_MAX_CONCURRENT_PER_WORKER"
 PDF_TIMEOUT_RISK_MS_ENV_VAR = "PDF_TIMEOUT_RISK_MS"
+PDF_IN_MEMORY_CACHE_ENABLED_ENV_VAR = "PDF_IN_MEMORY_CACHE_ENABLED"
+PDF_IN_MEMORY_CACHE_TTL_SECONDS_ENV_VAR = "PDF_IN_MEMORY_CACHE_TTL_SECONDS"
 PDF_CACHE_BUCKETS_BY_TEMPLATE = {
 	"reception_note.html": "reception-notes",
 	"reception_certificate.html": "reception-certificates",
 	"circularity_certificate.html": "circularity-certificates",
+}
+PDF_TEMPLATE_VERSION_ENV_VARS_BY_TEMPLATE = {
+	"reception_note.html": "PDF_TEMPLATE_VERSION_RECEPTION_NOTE",
+	"reception_certificate.html": "PDF_TEMPLATE_VERSION_RECEPTION_CERTIFICATE",
+	"circularity_certificate.html": "PDF_TEMPLATE_VERSION_CIRCULARITY_CERTIFICATE",
 }
 
 
@@ -94,6 +101,10 @@ class PdfGenerationService:
 		self._browser_task_queue: queue.Queue[tuple[Future[Any], Any | None]] = queue.Queue()
 		self._pdf_timeout_risk_ms = self._read_positive_int_env(PDF_TIMEOUT_RISK_MS_ENV_VAR, 45_000)
 		self._max_concurrent_renders = self._read_positive_int_env(PDF_MAX_CONCURRENT_PER_WORKER_ENV_VAR, 0)
+		self._in_memory_cache_enabled = self._read_bool_env(PDF_IN_MEMORY_CACHE_ENABLED_ENV_VAR, False)
+		self._in_memory_cache_ttl_seconds = self._read_positive_int_env(PDF_IN_MEMORY_CACHE_TTL_SECONDS_ENV_VAR, 300)
+		self._pdf_memory_cache_lock = threading.RLock()
+		self._pdf_memory_cache: dict[str, tuple[float, bytes]] = {}
 		self._render_slots = (
 			threading.BoundedSemaphore(self._max_concurrent_renders)
 			if self._max_concurrent_renders > 0
@@ -115,21 +126,70 @@ class PdfGenerationService:
 			},
 		)
 
-	def generate_pdf(self, template_name: str, context: Mapping[str, Any]) -> bytes:
+	def generate_pdf(
+		self,
+		template_name: str,
+		context: Mapping[str, Any],
+		*,
+		document_type: str | None = None,
+		document_id: str | int | None = None,
+		cache_key: str | None = None,
+	) -> bytes:
 		request_started_at = time.perf_counter()
 		template_filename = self._normalize_template_name(template_name)
+		template_basename = Path(template_filename).name
+		resolved_document_type = (document_type or template_basename.removesuffix(".html").replace("_", "-")).strip()
+		resolved_document_id = str(document_id).strip() if document_id is not None else ""
+		template_version = self._get_template_version(template_basename)
+		memory_cache_key = self._build_memory_cache_key(
+			template_name=template_basename,
+			document_type=resolved_document_type,
+			document_id=cache_key or resolved_document_id,
+			template_version=template_version,
+		)
 		logger.info(
 			"pdf_generation_requested",
 			extra={
 				"template_name": template_filename,
 				"context_key_count": len(context),
+				"document_type": resolved_document_type,
+				"document_id": resolved_document_id,
+				"template_version": template_version,
+				"memory_cache_enabled": self._in_memory_cache_enabled,
 				"process_id": self._process_id,
 			},
 		)
 		logger.info(
-			"pdf_cache_eligibility_assessed",
-			extra=self._build_cache_eligibility_payload(template_filename),
+			"pdf_cache_state_assessed",
+			extra=self._build_cache_state_payload(template_basename, resolved_document_type, resolved_document_id, memory_cache_key),
 		)
+
+		cached_pdf_bytes = self._get_cached_pdf(memory_cache_key)
+		if cached_pdf_bytes is not None:
+			total_request_ms = round((time.perf_counter() - request_started_at) * 1000, 2)
+			logger.info(
+				"pdf_request_completed",
+				extra={
+					"template_name": template_basename,
+					"document_type": resolved_document_type,
+					"document_id": resolved_document_id,
+					"template_version": template_version,
+					"size_bytes": len(cached_pdf_bytes),
+					"template_render_ms": 0.0,
+					"html_prepare_ms": 0.0,
+					"limiter_wait_ms": 0.0,
+					"browser_acquire_ms": 0.0,
+					"page_render_ms": 0.0,
+					"pdf_generation_ms": 0.0,
+					"total_request_ms": total_request_ms,
+					"process_id": self._process_id,
+					"timeout_risk": total_request_ms >= self._pdf_timeout_risk_ms,
+					"memory_cache_enabled": self._in_memory_cache_enabled,
+					"memory_cache_hit": True,
+				},
+			)
+			return cached_pdf_bytes
+
 		template_path = self._get_template_path(template_filename)
 		self._validate_assets(template_path)
 		template_render_started_at = time.perf_counter()
@@ -142,6 +202,10 @@ class PdfGenerationService:
 			prepared_html,
 			template_path,
 			request_started_at=request_started_at,
+			document_type=resolved_document_type,
+			document_id=resolved_document_id,
+			template_version=template_version,
+			memory_cache_key=memory_cache_key,
 			template_render_ms=template_render_ms,
 			html_prepare_ms=html_prepare_ms,
 		)
@@ -291,6 +355,10 @@ class PdfGenerationService:
 		template_path: Path,
 		*,
 		request_started_at: float,
+		document_type: str,
+		document_id: str,
+		template_version: str,
+		memory_cache_key: str | None,
 		template_render_ms: float,
 		html_prepare_ms: float,
 	) -> bytes:
@@ -319,6 +387,9 @@ class PdfGenerationService:
 
 					completion_payload = {
 						"template_name": template_path.name,
+						"document_type": document_type,
+						"document_id": document_id,
+						"template_version": template_version,
 						"size_bytes": len(pdf_bytes),
 						"template_render_ms": template_render_ms,
 						"html_prepare_ms": html_prepare_ms,
@@ -329,8 +400,11 @@ class PdfGenerationService:
 						"total_request_ms": total_request_ms,
 						"process_id": self._process_id,
 						"timeout_risk": total_request_ms >= self._pdf_timeout_risk_ms,
+						"memory_cache_enabled": self._in_memory_cache_enabled,
+						"memory_cache_hit": False,
 						**acquisition_details,
 					}
+					self._store_cached_pdf(memory_cache_key, pdf_bytes)
 					logger.info("pdf_generation_succeeded", extra=completion_payload)
 					logger.info("pdf_request_completed", extra=completion_payload)
 					return pdf_bytes
@@ -338,6 +412,9 @@ class PdfGenerationService:
 					browser_acquire_ms = round((time.perf_counter() - request_started_at) * 1000, 2)
 					failure_payload = {
 						"template_name": template_path.name,
+						"document_type": document_type,
+						"document_id": document_id,
+						"template_version": template_version,
 						"error_type": type(exc).__name__,
 						"template_render_ms": template_render_ms,
 						"html_prepare_ms": html_prepare_ms,
@@ -345,6 +422,8 @@ class PdfGenerationService:
 						"browser_acquire_ms": browser_acquire_ms,
 						"total_request_ms": round((time.perf_counter() - request_started_at) * 1000, 2),
 						"process_id": self._process_id,
+						"memory_cache_enabled": self._in_memory_cache_enabled,
+						"memory_cache_hit": False,
 						**acquisition_details,
 					}
 
@@ -609,6 +688,28 @@ class PdfGenerationService:
 
 		return max(parsed_value, 0)
 
+	def _read_bool_env(self, env_var_name: str, default: bool) -> bool:
+		raw_value = os.getenv(env_var_name, "").strip().lower()
+		if not raw_value:
+			return default
+
+		if raw_value in {"1", "true", "yes", "on"}:
+			return True
+
+		if raw_value in {"0", "false", "no", "off"}:
+			return False
+
+		logger.warning(
+			"pdf_env_setting_invalid",
+			extra={
+				"process_id": self._process_id,
+				"env_var_name": env_var_name,
+				"env_var_value": raw_value,
+				"default_value": default,
+			},
+		)
+		return default
+
 	def _is_browser_usable(self, browser: Any | None) -> bool:
 		if browser is None:
 			return False
@@ -639,15 +740,73 @@ class PdfGenerationService:
 			)
 		)
 
-	def _build_cache_eligibility_payload(self, template_name: str) -> dict[str, Any]:
-		template_basename = Path(template_name).name
+	def _build_cache_state_payload(
+		self,
+		template_name: str,
+		document_type: str,
+		document_id: str,
+		memory_cache_key: str | None,
+	) -> dict[str, Any]:
 		return {
 			"template_name": template_name,
+			"document_type": document_type,
+			"document_id": document_id,
 			"process_id": self._process_id,
-			"cache_eligible": False,
-			"cache_bucket": PDF_CACHE_BUCKETS_BY_TEMPLATE.get(template_basename, "pdf-documents"),
-			"cache_reason": "blob_storage_not_enabled_phase2a",
+			"memory_cache_enabled": self._in_memory_cache_enabled,
+			"memory_cache_ttl_seconds": self._in_memory_cache_ttl_seconds,
+			"memory_cache_key_present": bool(memory_cache_key),
+			"cache_bucket": PDF_CACHE_BUCKETS_BY_TEMPLATE.get(template_name, "pdf-documents"),
 		}
+
+	def _get_template_version(self, template_name: str) -> str:
+		env_var_name = PDF_TEMPLATE_VERSION_ENV_VARS_BY_TEMPLATE.get(template_name)
+		if not env_var_name:
+			return "1"
+
+		configured_value = os.getenv(env_var_name, "").strip()
+		return configured_value or "1"
+
+	def _build_memory_cache_key(
+		self,
+		*,
+		template_name: str,
+		document_type: str,
+		document_id: str,
+		template_version: str,
+	) -> str | None:
+		if not self._in_memory_cache_enabled or self._in_memory_cache_ttl_seconds <= 0:
+			return None
+
+		normalized_document_id = document_id.strip()
+		if not normalized_document_id:
+			return None
+
+		return f"{template_name}|{document_type}|{normalized_document_id}|{template_version}"
+
+	def _get_cached_pdf(self, memory_cache_key: str | None) -> bytes | None:
+		if not memory_cache_key:
+			return None
+
+		now = time.time()
+		with self._pdf_memory_cache_lock:
+			cached_entry = self._pdf_memory_cache.get(memory_cache_key)
+			if cached_entry is None:
+				return None
+
+			expires_at, pdf_bytes = cached_entry
+			if expires_at <= now:
+				self._pdf_memory_cache.pop(memory_cache_key, None)
+				return None
+
+			return pdf_bytes
+
+	def _store_cached_pdf(self, memory_cache_key: str | None, pdf_bytes: bytes) -> None:
+		if not memory_cache_key:
+			return
+
+		expires_at = time.time() + self._in_memory_cache_ttl_seconds
+		with self._pdf_memory_cache_lock:
+			self._pdf_memory_cache[memory_cache_key] = (expires_at, pdf_bytes)
 
 	def _build_browser_launch_options(self, browser_type: Any) -> dict[str, Any]:
 		executable_path = os.getenv(PLAYWRIGHT_EXECUTABLE_ENV_VAR, "").strip() or browser_type.executable_path
@@ -739,5 +898,18 @@ pdf_generation_service = PdfGenerationService()
 atexit.register(pdf_generation_service.close_shared_browser)
 
 
-def generate_pdf(template_name: str, context: Mapping[str, Any]) -> bytes:
-	return pdf_generation_service.generate_pdf(template_name, context)
+def generate_pdf(
+	template_name: str,
+	context: Mapping[str, Any],
+	*,
+	document_type: str | None = None,
+	document_id: str | int | None = None,
+	cache_key: str | None = None,
+) -> bytes:
+	return pdf_generation_service.generate_pdf(
+		template_name,
+		context,
+		document_type=document_type,
+		document_id=document_id,
+		cache_key=cache_key,
+	)

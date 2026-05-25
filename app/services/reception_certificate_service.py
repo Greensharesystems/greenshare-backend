@@ -99,8 +99,15 @@ def generate_reception_certificate_pdf(
 
 	linked_reception_notes = get_linked_reception_notes(db, list(reception_certificate.linked_rnids or []), principal)
 	context = build_reception_certificate_pdf_context(reception_certificate, linked_reception_notes)
-	pdf_bytes = generate_pdf("pdf/reception_certificate.html", context)
-	filename = f"{normalize_rcid(reception_certificate.rcid)}.pdf"
+	normalized_rcid = normalize_rcid(reception_certificate.rcid)
+	pdf_bytes = generate_pdf(
+		"pdf/reception_certificate.html",
+		context,
+		document_type="reception-certificate",
+		document_id=normalized_rcid,
+		cache_key=normalized_rcid,
+	)
+	filename = f"{normalized_rcid}.pdf"
 	return filename, pdf_bytes
 
 

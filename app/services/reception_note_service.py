@@ -100,8 +100,15 @@ def generate_reception_note_pdf(db: Session, reception_note_reference: int | str
 		raise ValueError("That reception note could not be found.")
 
 	context = build_reception_note_pdf_context(reception_note)
-	pdf_bytes = generate_pdf("pdf/reception_note.html", context)
-	filename = f"{normalize_rnid(reception_note.rnid)}.pdf"
+	normalized_rnid = normalize_rnid(reception_note.rnid)
+	pdf_bytes = generate_pdf(
+		"pdf/reception_note.html",
+		context,
+		document_type="reception-note",
+		document_id=normalized_rnid,
+		cache_key=normalized_rnid,
+	)
+	filename = f"{normalized_rnid}.pdf"
 	return filename, pdf_bytes
 
 
