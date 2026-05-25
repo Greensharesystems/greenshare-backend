@@ -112,8 +112,15 @@ def generate_circularity_certificate_pdf(
 
 	linked_reception_certificates = get_linked_reception_certificates(db, list(circularity_certificate.linked_rcids or []), principal)
 	context = build_circularity_certificate_pdf_context(db, circularity_certificate, linked_reception_certificates)
-	pdf_bytes = generate_pdf("pdf/circularity_certificate.html", context)
-	filename = f"{normalize_ccid(circularity_certificate.ccid)}.pdf"
+	normalized_ccid = normalize_ccid(circularity_certificate.ccid)
+	pdf_bytes = generate_pdf(
+		"pdf/circularity_certificate.html",
+		context,
+		document_type="circularity-certificate",
+		document_id=normalized_ccid,
+		cache_key=normalized_ccid,
+	)
+	filename = f"{normalized_ccid}.pdf"
 	return filename, pdf_bytes
 
 
