@@ -1,8 +1,11 @@
 import atexit
+import base64
 from collections.abc import Mapping
 from concurrent.futures import Future
 from contextlib import nullcontext
+from functools import lru_cache
 import logging
+import mimetypes
 import os
 import platform
 from pathlib import Path
@@ -19,6 +22,25 @@ from playwright.sync_api import sync_playwright
 TEMPLATES_ROOT = Path(__file__).resolve().parent.parent / "templates"
 PDF_TEMPLATE_DIR = TEMPLATES_ROOT / "pdf"
 PDF_SHARED_STYLESHEET = PDF_TEMPLATE_DIR / "styles.css"
+PDF_STATIC_IMAGE_DIR = Path(__file__).resolve().parent.parent / "static" / "images"
+PDF_IMAGE_ASSET_PATHS = {
+	"greenshare_logo_src": "greensharelogo.png",
+	"zero_waste_logo_src": "zerowastecolorlogo.png",
+	"signature_stamp_src": "igsignaturezwstamp.png",
+}
+PDF_TEMPLATE_REQUIRED_IMAGE_ASSETS = {
+	"reception_note.html": ("greenshare_logo_src", "zero_waste_logo_src"),
+	"reception_certificate.html": (
+		"greenshare_logo_src",
+		"zero_waste_logo_src",
+		"signature_stamp_src",
+	),
+	"circularity_certificate.html": (
+		"greenshare_logo_src",
+		"zero_waste_logo_src",
+		"signature_stamp_src",
+	),
+}
 
 logger = logging.getLogger(__name__)
 PLAYWRIGHT_EXECUTABLE_ENV_VAR = "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"
@@ -31,16 +53,31 @@ PDF_CACHE_BUCKETS_BY_TEMPLATE = {
 }
 
 
+@lru_cache(maxsize=1)
+def load_css_content(stylesheet_path: Path) -> str:
+	return stylesheet_path.read_text(encoding="utf-8")
+
+
+@lru_cache(maxsize=len(PDF_IMAGE_ASSET_PATHS))
+def load_image_as_base64(image_path: Path) -> str:
+	mime_type, _ = mimetypes.guess_type(image_path.name)
+	resolved_mime_type = mime_type or "application/octet-stream"
+	encoded_bytes = base64.b64encode(image_path.read_bytes()).decode("ascii")
+	return f"data:{resolved_mime_type};base64,{encoded_bytes}"
+
+
 class PdfGenerationService:
 	def __init__(
 		self,
 		templates_root: Path | None = None,
 		shared_stylesheet: Path | None = None,
+		static_image_dir: Path | None = None,
 		environment: Environment | None = None,
 	) -> None:
 		self.templates_root = templates_root or TEMPLATES_ROOT
 		self.template_dir = self.templates_root / "pdf"
 		self.shared_stylesheet = shared_stylesheet or PDF_SHARED_STYLESHEET
+		self.static_image_dir = static_image_dir or PDF_STATIC_IMAGE_DIR
 		self.environment = environment or Environment(
 			loader=FileSystemLoader(str(self.templates_root)),
 			autoescape=select_autoescape(["html", "xml"]),
@@ -115,7 +152,23 @@ class PdfGenerationService:
 		except TemplateNotFound as exc:
 			raise FileNotFoundError(f"PDF template '{template_name}' was not found.") from exc
 
-		return template.render(**dict(context))
+		template_asset_context = self._build_template_asset_context(template_name)
+		render_context = dict(context)
+		render_context.update(template_asset_context)
+		rendered_html = template.render(**render_context)
+		logger.info(
+			"template_render_completed",
+			extra={
+				"template_name": Path(template_name).name,
+				"css_embedded": bool(template_asset_context["embedded_css"]),
+				"logo_embedded": all(
+					template_asset_context[asset_name].startswith("data:image/")
+					for asset_name in ("greenshare_logo_src", "zero_waste_logo_src")
+				),
+				"process_id": self._process_id,
+			},
+		)
+		return rendered_html
 
 	def _normalize_template_name(self, template_name: str) -> str:
 		normalized_template_name = template_name.strip().replace("\\", "/")
@@ -147,44 +200,90 @@ class PdfGenerationService:
 				f"Shared PDF stylesheet was not found at '{self.shared_stylesheet}'."
 			)
 
+		for asset_name in self._required_image_assets(template_path.name):
+			image_path = self.static_image_dir / PDF_IMAGE_ASSET_PATHS[asset_name]
+			if not image_path.is_file():
+				raise FileNotFoundError(f"PDF image asset was not found at '{image_path}'.")
+
 	def _prepare_html_document(self, rendered_html: str, template_path: Path) -> str:
-		base_href = self._to_directory_uri(template_path.parent)
-		prepared_html = self._set_base_href(rendered_html, base_href)
-		prepared_html = self._replace_stylesheet_href(prepared_html)
-		prepared_html = self._absolutize_asset_sources(prepared_html, template_path.parent)
+		prepared_html = self._inline_linked_stylesheets(rendered_html)
+		prepared_html = self._embed_local_image_sources(prepared_html, template_path.parent, template_path.name)
+		self._assert_self_contained_html(prepared_html, template_path.name)
 		return prepared_html
 
-	def _set_base_href(self, rendered_html: str, base_href: str) -> str:
-		base_tag = f'<base href="{base_href}" />'
+	def _required_image_assets(self, template_name: str) -> tuple[str, ...]:
+		return PDF_TEMPLATE_REQUIRED_IMAGE_ASSETS.get(template_name, ())
 
-		if re.search(r"<base\s+href=", rendered_html, flags=re.IGNORECASE):
-			return re.sub(r"<base\s+href=[^>]+>", base_tag, rendered_html, count=1, flags=re.IGNORECASE)
+	def _build_template_asset_context(self, template_name: str) -> dict[str, str]:
+		template_basename = Path(template_name).name
+		try:
+			asset_context = {
+				"embedded_css": load_css_content(self.shared_stylesheet),
+			}
+			for asset_name in self._required_image_assets(template_basename):
+				image_path = self.static_image_dir / PDF_IMAGE_ASSET_PATHS[asset_name]
+				asset_context[asset_name] = load_image_as_base64(image_path)
+			return asset_context
+		except Exception as exc:
+			self._log_asset_embed_failed(template_basename, exc)
+			raise
 
-		if "</head>" in rendered_html:
-			return rendered_html.replace("</head>", f"\t{base_tag}\n</head>", 1)
-
-		return f"{base_tag}\n{rendered_html}"
-
-	def _replace_stylesheet_href(self, rendered_html: str) -> str:
-		stylesheet_uri = self.shared_stylesheet.resolve().as_uri()
+	def _inline_linked_stylesheets(self, rendered_html: str) -> str:
+		stylesheet_markup = f"<style>{load_css_content(self.shared_stylesheet)}</style>"
 		return re.sub(
-			r'(<link[^>]+rel=["\']stylesheet["\'][^>]+href=["\'])([^"\']+)(["\'][^>]*>)',
-			rf'\1{stylesheet_uri}\3',
+			r'<link[^>]+rel=["\']stylesheet["\'][^>]*>',
+			stylesheet_markup,
 			rendered_html,
 			count=1,
 			flags=re.IGNORECASE,
 		)
 
-	def _absolutize_asset_sources(self, rendered_html: str, asset_base_dir: Path) -> str:
+	def _embed_local_image_sources(self, rendered_html: str, asset_base_dir: Path, template_name: str) -> str:
 		def replace_source(match: re.Match[str]) -> str:
 			prefix, source, suffix = match.groups()
-			if source.startswith(("http://", "https://", "data:", "file://", "#")):
+			if source.startswith(("http://", "https://", "data:", "#")):
 				return match.group(0)
 
-			absolute_source = (asset_base_dir / source).resolve().as_uri()
-			return f"{prefix}{absolute_source}{suffix}"
+			try:
+				embedded_source = load_image_as_base64((asset_base_dir / source).resolve())
+			except Exception as exc:
+				self._log_asset_embed_failed(template_name, exc, source=source)
+				raise
 
-		return re.sub(r'(<(?:img|source)[^>]+src=["\'])([^"\']+)(["\'][^>]*>)', replace_source, rendered_html, flags=re.IGNORECASE)
+			return f"{prefix}{embedded_source}{suffix}"
+
+		return re.sub(
+			r'(<(?:img|source)[^>]+src=["\'])([^"\']+)(["\'][^>]*>)',
+			replace_source,
+			rendered_html,
+			flags=re.IGNORECASE,
+		)
+
+	def _assert_self_contained_html(self, prepared_html: str, template_name: str) -> None:
+		if re.search(r'<link[^>]+rel=["\']stylesheet["\']', prepared_html, flags=re.IGNORECASE):
+			raise RuntimeError(
+				f"Prepared PDF HTML for '{template_name}' still contains an external stylesheet reference."
+			)
+
+		if re.search(
+			r'<(?:img|source)[^>]+src=["\'](?!https?://|data:|#)[^"\']+["\']',
+			prepared_html,
+			flags=re.IGNORECASE,
+		):
+			raise RuntimeError(
+				f"Prepared PDF HTML for '{template_name}' still contains a non-embedded asset reference."
+			)
+
+	def _log_asset_embed_failed(self, template_name: str, exc: Exception, *, source: str | None = None) -> None:
+		logger.exception(
+			"asset_embed_failed",
+			extra={
+				"template_name": template_name,
+				"asset_source": source or "service_asset_bundle",
+				"error_type": type(exc).__name__,
+				"process_id": self._process_id,
+			},
+		)
 
 	def _render_pdf_with_browser(
 		self,
