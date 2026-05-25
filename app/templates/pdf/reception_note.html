@@ -4,7 +4,7 @@
 	<meta charset="UTF-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 	<title>RECEPTION NOTE</title>
-	<link rel="stylesheet" href="styles.css" />
+	<style>{{ embedded_css | safe }}</style>
 </head>
 <body>
 	<main class="document document--reception-note">
@@ -14,7 +14,7 @@
 					<div class="document-header__brand">
 						<img
 							class="document-header__logo document-header__logo--left"
-							src="../../static/images/greensharelogo.png"
+							src="{{ greenshare_logo_src }}"
 							alt="Greenshare logo"
 						/>
 					</div>
@@ -22,7 +22,7 @@
 					<div class="document-header__brand document-header__brand--right">
 						<img
 							class="document-header__logo document-header__logo--right"
-							src="../../static/images/zerowastecolorlogo.png"
+							src="{{ zero_waste_logo_src }}"
 							alt="Zero Waste logo"
 						/>
 					</div>

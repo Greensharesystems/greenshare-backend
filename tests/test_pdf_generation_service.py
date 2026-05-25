@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 import logging
+import threading
 import time
 
 import pytest
@@ -326,18 +327,38 @@ def build_circularity_certificate_multi_pdf_context() -> dict[str, object]:
 	}
 
 
+def load_css_preview(stylesheet_path) -> str:
+	return stylesheet_path.read_text(encoding="utf-8")[:40]
 
-def test_prepare_html_document_uses_absolute_stylesheet_and_asset_paths() -> None:
+
+
+def test_prepare_html_document_embeds_stylesheet_and_assets() -> None:
 	service = PdfGenerationService()
 	template_name = service._normalize_template_name("pdf/reception_note.html")
 	template_path = service._get_template_path(template_name)
 	rendered_html = service.render_template(template_name, build_reception_note_pdf_context())
 	prepared_html = service._prepare_html_document(rendered_html, template_path)
 
-	assert f'<base href="{template_path.parent.as_uri()}/" />' in prepared_html
-	assert f'href="{PDF_SHARED_STYLESHEET.resolve().as_uri()}"' in prepared_html
-	assert "src=\"file:///" in prepared_html
-	assert "greensharelogo.png" in prepared_html
+	assert "<link rel=\"stylesheet\"" not in prepared_html
+	assert "<style>" in prepared_html
+	assert ":root {" in prepared_html
+	assert load_css_preview(PDF_SHARED_STYLESHEET) in prepared_html
+	assert "src=\"data:image/png;base64," in prepared_html
+	assert "../../static/images/" not in prepared_html
+	assert "file:///" not in prepared_html
+
+
+def test_render_template_logs_embedded_assets(caplog: pytest.LogCaptureFixture) -> None:
+	service = PdfGenerationService()
+
+	with caplog.at_level(logging.INFO):
+		rendered_html = service.render_template("pdf/reception_note.html", build_reception_note_pdf_context())
+
+	assert "<style>" in rendered_html
+	matching_records = [record for record in caplog.records if record.msg == "template_render_completed"]
+	assert matching_records
+	assert matching_records[-1].css_embedded is True
+	assert matching_records[-1].logo_embedded is True
 
 
 def test_generate_reception_note_pdf_returns_pdf_bytes() -> None:
