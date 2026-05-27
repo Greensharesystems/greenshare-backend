@@ -12,6 +12,7 @@ def get_leads(db: Session) -> list[Lead]:
 			selectinload(Lead.proposal_status),
 			selectinload(Lead.lead_status),
 		)
+		.where(Lead.deleted_at.is_(None))
 		.order_by(Lead.created_at.desc(), Lead.id.desc())
 	)
 	return list(db.scalars(statement).all())
@@ -26,13 +27,20 @@ def get_lead_by_lid(db: Session, lid: str) -> Lead | None:
 			selectinload(Lead.lead_status),
 		)
 		.where(Lead.lid == lid)
+		.where(Lead.deleted_at.is_(None))
 	)
 	return db.scalar(statement)
 
 
 def get_lead_lids(db: Session) -> list[str]:
-	statement = select(Lead.lid)
+	statement = select(Lead.lid).where(Lead.deleted_at.is_(None))
 	return [lid for lid in db.scalars(statement).all() if lid]
+
+
+def soft_delete_lead(db: Session, lead: Lead) -> None:
+	from datetime import datetime, timezone
+	lead.deleted_at = datetime.now(timezone.utc)
+	db.commit()
 
 
 def create_lead(db: Session, lead: Lead) -> Lead:

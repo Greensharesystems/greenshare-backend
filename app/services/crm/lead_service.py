@@ -65,6 +65,11 @@ def create_lead(db: Session, payload: LeadCreate) -> LeadResponse:
 	return serialize_lead(created_lead)
 
 
+def delete_lead(db: Session, lid: str) -> None:
+	lead = get_lead_model_by_lid(db, lid)
+	lead_repository.soft_delete_lead(db, lead)
+
+
 def update_lead(db: Session, lid: str, payload: LeadUpdate) -> LeadResponse:
 	lead = get_lead_model_by_lid(db, lid)
 

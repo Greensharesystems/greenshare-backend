@@ -301,6 +301,11 @@ def ensure_password_schema() -> None:
                     text("ALTER TABLE circularity_certificates ADD COLUMN secondary_ecosystem_details JSON DEFAULT '{}'"),
                 )
 
+        if "crm_leads" in existing_tables:
+            crm_leads_columns = {column["name"] for column in inspect(engine).get_columns("crm_leads")}
+            if "deleted_at" not in crm_leads_columns:
+                connection.execute(text("ALTER TABLE crm_leads ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE"))
+
     with SessionLocal() as db:
         should_commit = False
 
