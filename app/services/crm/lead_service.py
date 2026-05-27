@@ -1,9 +1,9 @@
 import re
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy.orm import Session
 
-from app.core.date_utils import format_display_date, normalize_date_for_output, normalize_date_for_storage
+from app.core.date_utils import format_display_date, normalize_date_for_output, normalize_date_for_storage, parse_supported_date
 from app.models.crm.lead import Lead
 from app.repositories.crm import lead_repository
 from app.schemas.crm.lead_schema import LeadCreate, LeadListResponse, LeadResponse, LeadUpdate, NextLeadIdResponse
@@ -119,6 +119,9 @@ def serialize_lead(lead: Lead) -> LeadResponse:
 	proposal_status_value = summarize_proposal_status(lead.proposal_status.status if lead.proposal_status is not None else None)
 	lead_status_value = summarize_lead_status(lead.lead_status.status if lead.lead_status is not None else None)
 	default_date = normalize_date_for_output(lead.lead_date)
+	lab_status_days = calculate_elapsed_days(lead.lead_date, resolve_lab_status_end_date(lead))
+	proposal_status_days = calculate_elapsed_days(lead.lead_date, resolve_proposal_status_end_date(lead))
+	lead_status_days = calculate_elapsed_days(lead.lead_date, resolve_lead_status_end_date(lead))
 
 	return LeadResponse(
 		id=lead.id,
@@ -141,11 +144,14 @@ def serialize_lead(lead: Lead) -> LeadResponse:
 		updated_at=lead.updated_at,
 		lab_id=lead.lab_status.lab_id if lead.lab_status is not None else None,
 		lab_status=lab_status_value,
+		lab_status_days=lab_status_days,
 		lab_updated_at=format_timestamp_for_output(lead.lab_status.updated_at if lead.lab_status is not None else None, default_date),
 		proposal_id=lead.proposal_status.pid if lead.proposal_status is not None else None,
 		proposal_status=proposal_status_value,
+		proposal_status_days=proposal_status_days,
 		proposal_updated_at=format_timestamp_for_output(lead.proposal_status.updated_at if lead.proposal_status is not None else None, default_date),
 		lead_status=lead_status_value,
+		lead_status_days=lead_status_days,
 		lead_status_updated_at=format_timestamp_for_output(lead.lead_status.updated_at if lead.lead_status is not None else None, default_date),
 	)
 
@@ -188,20 +194,50 @@ def format_timestamp_for_output(timestamp: datetime | None, fallback_date: str) 
 
 
 def summarize_lab_status(decision: str | None) -> str:
-	if decision == "Accept":
-		return "Approved"
-	if decision == "Reject":
-		return "Rejected"
-	return "Pending"
+	return normalize_optional_string(decision) or "Pending"
 
 
 def summarize_proposal_status(status: str | None) -> str:
-	if status in {"Sent", "Under Review", "Not Sent"}:
-		return status
-	return "Draft"
+	return normalize_optional_string(status) or "Pending"
 
 
 def summarize_lead_status(status: str | None) -> str:
-	if status in {"Open", "Won", "Lost"}:
-		return status
-	return "Open"
+	return normalize_optional_string(status) or "Open"
+
+
+def calculate_elapsed_days(start_date_value: str, end_date_value: date | None) -> int:
+	start_date = parse_supported_date(start_date_value)
+	if start_date is None:
+		return 0
+
+	resolved_end_date = end_date_value or get_current_date()
+	return max(0, (resolved_end_date - start_date).days)
+
+
+def resolve_lab_status_end_date(lead: Lead) -> date:
+	if lead.lab_status is not None and lead.lab_status.decision_date is not None:
+		return lead.lab_status.decision_date.date()
+
+	return get_current_date()
+
+
+def resolve_proposal_status_end_date(lead: Lead) -> date:
+	if lead.proposal_status is not None and lead.proposal_status.status_date is not None:
+		return lead.proposal_status.status_date.date()
+
+	return get_current_date()
+
+
+def resolve_lead_status_end_date(lead: Lead) -> date:
+	status_value = normalize_optional_string(lead.lead_status.status if lead.lead_status is not None else None)
+	if not status_value or status_value == "Open":
+		return get_current_date()
+
+	if lead.lead_status is not None and lead.lead_status.closed_date is not None:
+		return lead.lead_status.closed_date.date()
+
+	return get_current_date()
+
+
+def get_current_date() -> date:
+	return datetime.utcnow().date()

@@ -68,5 +68,10 @@ class CustomerResponse(BaseModel):
 	lastActive: str
 
 
+class CustomerSearchResponse(BaseModel):
+	cid: str
+	customer_name: str
+
+
 class NextCustomerIdResponse(BaseModel):
 	customerId: str

@@ -257,6 +257,30 @@ def ensure_password_schema() -> None:
             if "focal_persons_json" not in customer_columns:
                 connection.execute(text("ALTER TABLE customers ADD COLUMN focal_persons_json TEXT DEFAULT '[]'"))
 
+        crm_status_columns = {
+            "crm_lab_statuses": {
+                "created_at": "ALTER TABLE crm_lab_statuses ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+                "decision_date": "ALTER TABLE crm_lab_statuses ADD COLUMN decision_date TIMESTAMP",
+            },
+            "crm_proposal_statuses": {
+                "created_at": "ALTER TABLE crm_proposal_statuses ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+                "status_date": "ALTER TABLE crm_proposal_statuses ADD COLUMN status_date TIMESTAMP",
+            },
+            "crm_lead_statuses": {
+                "created_at": "ALTER TABLE crm_lead_statuses ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+                "closed_date": "ALTER TABLE crm_lead_statuses ADD COLUMN closed_date TIMESTAMP",
+            },
+        }
+
+        for table_name, column_statements in crm_status_columns.items():
+            if table_name not in existing_tables:
+                continue
+
+            columns = {column["name"] for column in inspect(engine).get_columns(table_name)}
+            for column_name, statement in column_statements.items():
+                if column_name not in columns:
+                    connection.execute(text(statement))
+
         for table_name in ["reception_notes", "reception_certificates", "circularity_certificates"]:
             if table_name not in existing_tables:
                 continue

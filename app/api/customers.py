@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthPrincipal, get_customer_scope_id, require_roles
 from app.db.database import get_db
-from app.schemas.customer import CustomerCreate, CustomerCsvExportRequest, CustomerResponse, CustomerUpdate, NextCustomerIdResponse
+from app.schemas.customer import CustomerCreate, CustomerCsvExportRequest, CustomerResponse, CustomerSearchResponse, CustomerUpdate, NextCustomerIdResponse
 from app.services import customer_service
 
 
@@ -16,6 +16,15 @@ def list_customers(
 	current_user: AuthPrincipal = Depends(require_roles("admin", "employee")),
 ) -> list[CustomerResponse]:
 	return customer_service.list_customers(db)
+
+
+@router.get("/search", response_model=list[CustomerSearchResponse])
+def search_customers(
+	q: str = Query("", min_length=0),
+	db: Session = Depends(get_db),
+	current_user: AuthPrincipal = Depends(require_roles("admin", "employee")),
+) -> list[CustomerSearchResponse]:
+	return customer_service.search_customers(db, q)
 
 
 @router.get("/me", response_model=CustomerResponse)

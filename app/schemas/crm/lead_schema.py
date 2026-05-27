@@ -61,11 +61,14 @@ class LeadResponse(BaseModel):
 	updated_at: datetime
 	lab_id: str | None = None
 	lab_status: str
+	lab_status_days: int
 	lab_updated_at: str
 	proposal_id: str | None = None
 	proposal_status: str
+	proposal_status_days: int
 	proposal_updated_at: str
 	lead_status: str
+	lead_status_days: int
 	lead_status_updated_at: str
 
 

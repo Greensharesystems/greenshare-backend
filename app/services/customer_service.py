@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.date_utils import normalize_date_for_output, normalize_date_for_storage
 from app.models.customer import Customer
 from app.repositories import customer_repository
-from app.schemas.customer import CustomerCreate, CustomerResponse, CustomerUpdate, FocalPersonInput, FocalPersonResponse, NextCustomerIdResponse
+from app.schemas.customer import CustomerCreate, CustomerResponse, CustomerSearchResponse, CustomerUpdate, FocalPersonInput, FocalPersonResponse, NextCustomerIdResponse
 
 
 CUSTOMER_ID_PATTERN = re.compile(r"CID-(\d+)")
@@ -33,6 +33,16 @@ CUSTOMER_CSV_COLUMNS = [
 def list_customers(db: Session) -> list[CustomerResponse]:
 	customers = customer_repository.get_customers(db)
 	return [serialize_customer(customer) for customer in customers]
+
+
+def search_customers(db: Session, query: str) -> list[CustomerSearchResponse]:
+	return [
+		CustomerSearchResponse(
+			cid=customer.customer_id,
+			customer_name=customer.company_name,
+		)
+		for customer in customer_repository.search_customers(db, query)
+	]
 
 
 def get_customer_profile(db: Session, customer_id: str) -> CustomerResponse:

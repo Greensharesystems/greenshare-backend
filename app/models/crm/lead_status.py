@@ -14,6 +14,8 @@ class LeadStatus(Base):
 	status_other: Mapped[str | None] = mapped_column(String(255), nullable=True)
 	comments: Mapped[str | None] = mapped_column(Text, nullable=True)
 	updated_by: Mapped[str] = mapped_column(String(255), nullable=False)
+	created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+	closed_date: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 	updated_at: Mapped[DateTime] = mapped_column(
 		DateTime(timezone=True),
 		server_default=func.now(),

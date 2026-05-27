@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 
 from app.models.crm.lead_status import LeadStatus
@@ -42,6 +44,7 @@ def update_lead_status(db: Session, lid: str, payload: LeadStatusCreateUpdate) -
 			status_other=status_other,
 			comments=normalize_optional_string(payload.comments),
 			updated_by=normalize_required_string(payload.updated_by, "Updated By"),
+			closed_date=resolve_closed_date(status_value),
 		)
 		status_record = lead_status_repository.create(db, status_record)
 	else:
@@ -50,6 +53,7 @@ def update_lead_status(db: Session, lid: str, payload: LeadStatusCreateUpdate) -
 		status_record.status_other = status_other
 		status_record.comments = normalize_optional_string(payload.comments)
 		status_record.updated_by = normalize_required_string(payload.updated_by, "Updated By")
+		status_record.closed_date = resolve_closed_date(status_value, status_record.closed_date)
 		status_record = lead_status_repository.update(db, status_record)
 
 	return LeadStatusResponse.model_validate(status_record)
@@ -65,3 +69,10 @@ def normalize_required_string(value: str | None, field_label: str) -> str:
 def normalize_optional_string(value: str | None) -> str | None:
 	normalized_value = str(value or "").strip()
 	return normalized_value or None
+
+
+def resolve_closed_date(status_value: str, existing_closed_date: datetime | None = None) -> datetime | None:
+	if status_value == "Open":
+		return None
+
+	return existing_closed_date or datetime.now(timezone.utc)
