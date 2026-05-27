@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 
 from app.models.crm.proposal_status import ProposalStatus
@@ -16,7 +18,7 @@ def get_proposal_status(db: Session, lid: str) -> ProposalStatusResponse:
 			lead_id=lead.id,
 			lid=lead.lid,
 			pid="",
-			status="Not Sent",
+			status="",
 			status_other=None,
 			comments=None,
 			updated_by="",
@@ -44,6 +46,7 @@ def update_proposal_status(db: Session, lid: str, payload: ProposalStatusCreateU
 			status_other=status_other,
 			comments=normalize_optional_string(payload.comments),
 			updated_by=normalize_required_string(payload.updated_by, "Updated By"),
+			status_date=datetime.now(timezone.utc),
 		)
 		status_record = proposal_status_repository.create(db, status_record)
 	else:
@@ -53,6 +56,8 @@ def update_proposal_status(db: Session, lid: str, payload: ProposalStatusCreateU
 		status_record.status_other = status_other
 		status_record.comments = normalize_optional_string(payload.comments)
 		status_record.updated_by = normalize_required_string(payload.updated_by, "Updated By")
+		if status_record.status_date is None:
+			status_record.status_date = datetime.now(timezone.utc)
 		status_record = proposal_status_repository.update(db, status_record)
 
 	return ProposalStatusResponse.model_validate(status_record)

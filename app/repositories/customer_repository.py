@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models.customer import Customer
@@ -22,6 +22,26 @@ def get_customer_by_customer_id(db: Session, customer_id: str) -> Customer | Non
 def get_customer_by_contact_email(db: Session, email: str) -> Customer | None:
 	statement = select(Customer).where(Customer.contact_person_email == email)
 	return db.scalar(statement)
+
+
+def search_customers(db: Session, query: str, limit: int = 10) -> list[Customer]:
+	normalized_query = str(query or "").strip()
+	if not normalized_query:
+		return []
+
+	search_value = f"%{normalized_query}%"
+	statement = (
+		select(Customer)
+		.where(
+			or_(
+				Customer.customer_id.ilike(search_value),
+				Customer.company_name.ilike(search_value),
+			),
+		)
+		.order_by(Customer.company_name.asc(), Customer.customer_id.asc())
+		.limit(limit)
+	)
+	return list(db.scalars(statement).all())
 
 
 def create_customer(db: Session, customer: Customer) -> Customer:

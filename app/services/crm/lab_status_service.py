@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 
 from app.models.crm.lab_status import LabStatus
@@ -16,7 +18,7 @@ def get_lab_status(db: Session, lid: str) -> LabStatusResponse:
 			lead_id=lead.id,
 			lid=lead.lid,
 			lab_id="",
-			decision="Not Applicable",
+			decision="",
 			decision_other=None,
 			comments=None,
 			chemist_name="",
@@ -44,6 +46,7 @@ def update_lab_status(db: Session, lid: str, payload: LabStatusCreateUpdate) -> 
 			decision_other=decision_other,
 			comments=normalize_optional_string(payload.comments),
 			chemist_name=normalize_required_string(payload.chemist_name, "Chemist Name"),
+			decision_date=datetime.now(timezone.utc),
 		)
 		status_record = lab_status_repository.create(db, status_record)
 	else:
@@ -53,6 +56,8 @@ def update_lab_status(db: Session, lid: str, payload: LabStatusCreateUpdate) -> 
 		status_record.decision_other = decision_other
 		status_record.comments = normalize_optional_string(payload.comments)
 		status_record.chemist_name = normalize_required_string(payload.chemist_name, "Chemist Name")
+		if status_record.decision_date is None:
+			status_record.decision_date = datetime.now(timezone.utc)
 		status_record = lab_status_repository.update(db, status_record)
 
 	return LabStatusResponse.model_validate(status_record)

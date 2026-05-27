@@ -30,6 +30,8 @@ class Lead(Base):
 		onupdate=func.now(),
 		nullable=False,
 	)
+	deleted_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+
 	lab_status: Mapped["LabStatus | None"] = relationship(
 		"LabStatus",
 		back_populates="lead",
