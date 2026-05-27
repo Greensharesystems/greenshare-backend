@@ -14,6 +14,10 @@ from sqlalchemy import inspect, or_, text
 from sqlalchemy.orm import Session
 
 from app.api.auth import router as auth_router
+from app.api.crm.lab_status import router as crm_lab_status_router
+from app.api.crm.leads import router as crm_leads_router
+from app.api.crm.lead_status import router as crm_lead_status_router
+from app.api.crm.proposal_status import router as crm_proposal_status_router
 from app.api.customers import router as customers_router
 from app.api.circularity_certificates import router as circularity_certificates_router
 from app.api.dashboard import customer_router as customer_dashboard_router, router as dashboard_router
@@ -24,6 +28,10 @@ from app.core.config import BACKEND_CORS_ORIGIN_REGEX, BACKEND_CORS_ORIGINS, DEF
 from app.core.logging_config import configure_logging
 from app.db.database import Base, SessionLocal, engine
 from app.models.customer import Customer
+from app.models.crm.lab_status import LabStatus
+from app.models.crm.lead import Lead
+from app.models.crm.lead_status import LeadStatus
+from app.models.crm.proposal_status import ProposalStatus
 from app.models.circularity_certificate import CircularityCertificate
 from app.models.reception_certificate import ReceptionCertificate
 from app.models.reception_note import ReceptionNote
@@ -57,6 +65,10 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(customers_router)
+app.include_router(crm_leads_router)
+app.include_router(crm_lab_status_router)
+app.include_router(crm_proposal_status_router)
+app.include_router(crm_lead_status_router)
 app.include_router(reception_notes_router)
 app.include_router(reception_certificates_router)
 app.include_router(circularity_certificates_router)
