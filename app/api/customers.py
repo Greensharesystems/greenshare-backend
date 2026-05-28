@@ -13,7 +13,7 @@ router = APIRouter(prefix="/customers", tags=["customers"])
 @router.get("", response_model=list[CustomerResponse])
 def list_customers(
 	db: Session = Depends(get_db),
-	current_user: AuthPrincipal = Depends(require_roles("admin", "employee")),
+	current_user: AuthPrincipal = Depends(require_roles("admin")),
 ) -> list[CustomerResponse]:
 	return customer_service.list_customers(db)
 
@@ -41,7 +41,7 @@ def get_customer_profile(
 @router.get("/next-id", response_model=NextCustomerIdResponse)
 def get_next_customer_id(
 	db: Session = Depends(get_db),
-	current_user: AuthPrincipal = Depends(require_roles("admin", "employee")),
+	current_user: AuthPrincipal = Depends(require_roles("admin")),
 ) -> NextCustomerIdResponse:
 	return customer_service.get_next_customer_id(db)
 
@@ -62,7 +62,7 @@ def get_customer_for_management(
 def export_customers_csv(
 	payload: CustomerCsvExportRequest,
 	db: Session = Depends(get_db),
-	current_user: AuthPrincipal = Depends(require_roles("admin", "employee")),
+	current_user: AuthPrincipal = Depends(require_roles("admin")),
 ) -> Response:
 	filename, csv_content = customer_service.export_customers_csv(db, payload.customerIds)
 	return Response(
@@ -76,7 +76,7 @@ def export_customers_csv(
 def create_customer(
 	payload: CustomerCreate,
 	db: Session = Depends(get_db),
-	current_user: AuthPrincipal = Depends(require_roles("admin", "employee")),
+	current_user: AuthPrincipal = Depends(require_roles("admin")),
 ) -> CustomerResponse:
 	try:
 		return customer_service.create_customer(db, payload)
@@ -89,7 +89,7 @@ def update_customer(
 	customer_id: str,
 	payload: CustomerUpdate,
 	db: Session = Depends(get_db),
-	current_user: AuthPrincipal = Depends(require_roles("admin", "employee")),
+	current_user: AuthPrincipal = Depends(require_roles("admin")),
 ) -> CustomerResponse:
 	try:
 		return customer_service.update_customer(db, customer_id, payload)
@@ -102,7 +102,7 @@ def update_customer(
 def delete_customer(
 	customer_id: str,
 	db: Session = Depends(get_db),
-	current_user: AuthPrincipal = Depends(require_roles("admin", "employee")),
+	current_user: AuthPrincipal = Depends(require_roles("admin")),
 ) -> Response:
 	try:
 		customer_service.delete_customer(db, customer_id)
