@@ -53,7 +53,7 @@ def update_lead_status(db: Session, lid: str, payload: LeadStatusCreateUpdate) -
 		status_record.status_other = status_other
 		status_record.comments = normalize_optional_string(payload.comments)
 		status_record.updated_by = normalize_required_string(payload.updated_by, "Updated By")
-		status_record.closed_date = resolve_closed_date(status_value, status_record.closed_date)
+		status_record.closed_date = resolve_closed_date(status_value)
 		status_record = lead_status_repository.update(db, status_record)
 
 	return LeadStatusResponse.model_validate(status_record)

@@ -56,8 +56,7 @@ def update_proposal_status(db: Session, lid: str, payload: ProposalStatusCreateU
 		status_record.status_other = status_other
 		status_record.comments = normalize_optional_string(payload.comments)
 		status_record.updated_by = normalize_required_string(payload.updated_by, "Updated By")
-		if status_record.status_date is None:
-			status_record.status_date = datetime.now(timezone.utc)
+		status_record.status_date = datetime.now(timezone.utc)
 		status_record = proposal_status_repository.update(db, status_record)
 
 	return ProposalStatusResponse.model_validate(status_record)
