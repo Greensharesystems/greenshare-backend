@@ -84,7 +84,7 @@ def auth_headers() -> dict[str, str]:
 	return {"Authorization": f"Bearer {create_access_token(principal)}"}
 
 
-def create_lead(client: TestClient, lid: str = "LID-0001") -> dict[str, object]:
+def create_lead(client: TestClient, lid: str = "LID-0001", lead_date: str = "27-05-2026") -> dict[str, object]:
 	response = client.post(
 		"/crm/leads",
 		headers=auth_headers(),
@@ -103,7 +103,7 @@ def create_lead(client: TestClient, lid: str = "LID-0001") -> dict[str, object]:
 			"unit": "Others",
 			"unit_other": "Bales",
 			"comments": "Created from API test.",
-			"lead_date": "27-05-2026",
+			"lead_date": lead_date,
 		},
 	)
 
@@ -167,8 +167,9 @@ def test_create_and_list_leads(client: tuple[TestClient, Session]) -> None:
 	assert list_response.json()[0]["customer_name"] == "Green Loop Trading LLC"
 
 
-def test_get_lead_by_lid_returns_created_lead(client: tuple[TestClient, Session]) -> None:
+def test_get_lead_by_lid_returns_created_lead(monkeypatch: pytest.MonkeyPatch, client: tuple[TestClient, Session]) -> None:
 	test_client, _db = client
+	monkeypatch.setattr(lead_service, "get_current_date", lambda: date(2026, 5, 27))
 	create_lead(test_client)
 
 	response = test_client.get("/crm/leads/LID-0001", headers=auth_headers())
@@ -364,3 +365,145 @@ def test_invalid_lid_returns_clean_404s(client: tuple[TestClient, Session]) -> N
 	assert lab_response.json() == {"detail": "That lead could not be found."}
 	assert proposal_response.json() == {"detail": "That lead could not be found."}
 	assert lead_status_response.json() == {"detail": "That lead could not be found."}
+
+
+def test_new_lead_today_has_zero_days(client: tuple[TestClient, Session]) -> None:
+	test_client, _db = client
+	today_str = date.today().strftime("%d-%m-%Y")
+	create_lead(test_client, lead_date=today_str)
+
+	response = test_client.get("/crm/leads/LID-0001", headers=auth_headers())
+
+	assert response.status_code == 200
+	assert response.json()["lab_status"] == "Pending"
+	assert response.json()["proposal_status"] == "Pending"
+	assert response.json()["lead_status"] == "Open"
+	assert response.json()["lab_status_days"] == 0
+	assert response.json()["proposal_status_days"] == 0
+	assert response.json()["lead_status_days"] == 0
+
+
+def test_historical_lead_days_count_to_today(client: tuple[TestClient, Session]) -> None:
+	test_client, _db = client
+	create_lead(test_client, lead_date="01-03-2026")
+
+	response = test_client.get("/crm/leads/LID-0001", headers=auth_headers())
+
+	expected_days = (date.today() - date(2026, 3, 1)).days
+	assert response.status_code == 200
+	assert response.json()["lab_status_days"] == expected_days
+	assert response.json()["proposal_status_days"] == expected_days
+	assert response.json()["lead_status_days"] == expected_days
+
+
+def test_lab_decision_stops_days_at_decision_date(client: tuple[TestClient, Session]) -> None:
+	test_client, db = client
+	create_lead(test_client, lead_date="01-03-2026")
+
+	lead = db.query(Lead).filter(Lead.lid == "LID-0001").one()
+	lead.lab_status = LabStatus(
+		lead_id=lead.id,
+		lid=lead.lid,
+		lab_id="LAB-0001",
+		decision="Accept",
+		chemist_name="Test Chemist",
+		decision_date=datetime(2026, 3, 4, tzinfo=timezone.utc),
+	)
+	db.add(lead)
+	db.commit()
+
+	response = test_client.get("/crm/leads/LID-0001", headers=auth_headers())
+
+	assert response.status_code == 200
+	assert response.json()["lab_status"] == "Accept"
+	assert response.json()["lab_status_days"] == 3
+
+
+def test_proposal_submission_stops_days_at_status_date(client: tuple[TestClient, Session]) -> None:
+	test_client, db = client
+	create_lead(test_client, lead_date="01-03-2026")
+
+	lead = db.query(Lead).filter(Lead.lid == "LID-0001").one()
+	lead.proposal_status = ProposalStatus(
+		lead_id=lead.id,
+		lid=lead.lid,
+		pid="PID-0001",
+		status="Sent",
+		updated_by="Test User",
+		status_date=datetime(2026, 3, 6, tzinfo=timezone.utc),
+	)
+	db.add(lead)
+	db.commit()
+
+	response = test_client.get("/crm/leads/LID-0001", headers=auth_headers())
+
+	assert response.status_code == 200
+	assert response.json()["proposal_status"] == "Sent"
+	assert response.json()["proposal_status_days"] == 5
+
+
+def test_lead_status_closure_stops_days_at_closed_date(client: tuple[TestClient, Session]) -> None:
+	test_client, db = client
+	create_lead(test_client, lead_date="01-03-2026")
+
+	lead = db.query(Lead).filter(Lead.lid == "LID-0001").one()
+	lead.lead_status = LeadStatus(
+		lead_id=lead.id,
+		lid=lead.lid,
+		status="Won",
+		updated_by="Test User",
+		closed_date=datetime(2026, 3, 30, tzinfo=timezone.utc),
+	)
+	db.add(lead)
+	db.commit()
+
+	response = test_client.get("/crm/leads/LID-0001", headers=auth_headers())
+
+	assert response.status_code == 200
+	assert response.json()["lead_status"] == "Won"
+	assert response.json()["lead_status_days"] == 29
+
+
+def test_list_and_detail_endpoints_return_same_days(client: tuple[TestClient, Session]) -> None:
+	test_client, db = client
+	create_lead(test_client, lead_date="01-03-2026")
+
+	lead = db.query(Lead).filter(Lead.lid == "LID-0001").one()
+	lead.lab_status = LabStatus(
+		lead_id=lead.id,
+		lid=lead.lid,
+		lab_id="LAB-0001",
+		decision="Accept",
+		chemist_name="Test Chemist",
+		decision_date=datetime(2026, 3, 4, tzinfo=timezone.utc),
+	)
+	lead.proposal_status = ProposalStatus(
+		lead_id=lead.id,
+		lid=lead.lid,
+		pid="PID-0001",
+		status="Sent",
+		updated_by="Test User",
+		status_date=datetime(2026, 3, 6, tzinfo=timezone.utc),
+	)
+	lead.lead_status = LeadStatus(
+		lead_id=lead.id,
+		lid=lead.lid,
+		status="Won",
+		updated_by="Test User",
+		closed_date=datetime(2026, 3, 30, tzinfo=timezone.utc),
+	)
+	db.add(lead)
+	db.commit()
+
+	list_response = test_client.get("/crm/leads", headers=auth_headers())
+	detail_response = test_client.get("/crm/leads/LID-0001", headers=auth_headers())
+
+	assert list_response.status_code == 200
+	assert detail_response.status_code == 200
+
+	list_lead = list_response.json()[0]
+	detail_lead = detail_response.json()
+
+	assert list_lead["lab_status_days"] == detail_lead["lab_status_days"] == 3
+	assert list_lead["proposal_status_days"] == detail_lead["proposal_status_days"] == 5
+	assert list_lead["lead_status_days"] == detail_lead["lead_status_days"] == 29
