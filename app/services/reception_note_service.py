@@ -7,7 +7,7 @@ from app.core.auth import AuthPrincipal, can_access_customer_data, get_customer_
 from app.core.date_utils import normalize_date_for_output, normalize_date_for_storage, normalize_optional_date_for_storage
 from app.models.reception_note import ReceptionNote
 from app.repositories import reception_note_repository
-from app.schemas.reception_note import NextReceptionNoteIdResponse, ReceptionNoteCreate, ReceptionNoteResponse
+from app.schemas.reception_note import NextReceptionNoteIdResponse, ReceptionNoteCreate, ReceptionNoteResponse, ReceptionNoteUpdate
 from app.services.pdf_generation_service import generate_pdf
 
 
@@ -52,6 +52,7 @@ def create_reception_note(db: Session, payload: ReceptionNoteCreate, principal: 
 		producing_company_contact_person=payload.producingCompanyContactPerson.strip(),
 		producing_company_office_phone=payload.producingCompanyOfficePhone.strip(),
 		producing_company_email=payload.producingCompanyEmail.strip(),
+		referring_company=(payload.referringCompany or "").strip() or None,
 		transporting_company_name=payload.transportingCompanyName.strip(),
 		transporting_company_contact_person=payload.transportingCompanyContactPerson.strip(),
 		transporting_company_office_phone=payload.transportingCompanyOfficePhone.strip(),
@@ -62,6 +63,10 @@ def create_reception_note(db: Session, payload: ReceptionNoteCreate, principal: 
 		waste_stream_name=payload.wasteStreamName.strip(),
 		waste_stream_quantity=payload.wasteStreamQuantity.strip(),
 		rn_issued_by=rn_issued_by,
+		project_name=(payload.projectName or "").strip() or None,
+		project_number=(payload.projectNumber or "").strip() or None,
+		project_location=(payload.projectLocation or "").strip() or None,
+		project_custom_fields=payload.projectCustomFields or None,
 		owner_identifier=principal.identifier,
 		owner_role=principal.role,
 		status=normalize_status(payload.status),
@@ -82,11 +87,79 @@ def delete_reception_note(db: Session, rnid: str, principal: AuthPrincipal) -> N
 		raise ValueError("That reception note could not be found.")
 
 	try:
-		reception_note_repository.delete_reception_note(db, reception_note)
+		reception_note_repository.soft_delete_reception_note(db, reception_note, principal.identifier)
 		db.commit()
 	except Exception:
 		db.rollback()
 		raise
+
+
+def update_reception_note(db: Session, rnid: str, payload: ReceptionNoteUpdate, principal: AuthPrincipal) -> ReceptionNoteResponse:
+	normalized_rnid = normalize_rnid(rnid)
+	reception_note = reception_note_repository.get_reception_note_by_rnid(db, normalized_rnid)
+
+	if reception_note is None or not can_access_reception_note(reception_note, principal):
+		raise ValueError("That reception note could not be found.")
+
+	if payload.rnidDate is not None:
+		reception_note.rnid_date = normalize_date_for_storage(payload.rnidDate, "Reception Note ID Date")
+	if payload.weighBridgeSlipDate is not None:
+		reception_note.weigh_bridge_slip_date = normalize_optional_date_for_storage(payload.weighBridgeSlipDate, "Weigh Bridge Slip Date")
+	if payload.weighBridgeBillNo is not None:
+		reception_note.weigh_bridge_bill_no = payload.weighBridgeBillNo.strip()
+	if payload.producingCompanyName is not None:
+		reception_note.producing_company_name = payload.producingCompanyName.strip()
+	if payload.producingCompanyEmirate is not None:
+		reception_note.producing_company_emirate = payload.producingCompanyEmirate.strip()
+	if payload.producingCompanyOfficeAddress is not None:
+		reception_note.producing_company_office_address = payload.producingCompanyOfficeAddress.strip()
+	if payload.producingCompanyContactPerson is not None:
+		reception_note.producing_company_contact_person = payload.producingCompanyContactPerson.strip()
+	if payload.producingCompanyOfficePhone is not None:
+		reception_note.producing_company_office_phone = payload.producingCompanyOfficePhone.strip()
+	if payload.producingCompanyEmail is not None:
+		reception_note.producing_company_email = payload.producingCompanyEmail.strip()
+	if payload.referringCompany is not None:
+		reception_note.referring_company = payload.referringCompany.strip() or None
+	if payload.projectName is not None:
+		reception_note.project_name = payload.projectName.strip() or None
+	if payload.projectNumber is not None:
+		reception_note.project_number = payload.projectNumber.strip() or None
+	if payload.projectLocation is not None:
+		reception_note.project_location = payload.projectLocation.strip() or None
+	if payload.projectCustomFields is not None:
+		reception_note.project_custom_fields = payload.projectCustomFields or None
+	if payload.transportingCompanyName is not None:
+		reception_note.transporting_company_name = payload.transportingCompanyName.strip()
+	if payload.transportingCompanyContactPerson is not None:
+		reception_note.transporting_company_contact_person = payload.transportingCompanyContactPerson.strip()
+	if payload.transportingCompanyOfficePhone is not None:
+		reception_note.transporting_company_office_phone = payload.transportingCompanyOfficePhone.strip()
+	if payload.transportingCompanyEmail is not None:
+		reception_note.transporting_company_email = payload.transportingCompanyEmail.strip()
+	if payload.wasteStreams is not None:
+		reception_note.waste_streams = [normalize_waste_stream(stream.model_dump()) for stream in payload.wasteStreams]
+	if payload.vehiclePlateNo is not None:
+		reception_note.vehicle_plate_no = payload.vehiclePlateNo.strip()
+	if payload.driverName is not None:
+		reception_note.driver_name = payload.driverName.strip()
+	if payload.wasteStreamName is not None:
+		reception_note.waste_stream_name = payload.wasteStreamName.strip()
+	if payload.wasteStreamQuantity is not None:
+		reception_note.waste_stream_quantity = payload.wasteStreamQuantity.strip()
+	if payload.rnIssuedBy is not None:
+		reception_note.rn_issued_by = payload.rnIssuedBy.strip()
+	if payload.status is not None:
+		reception_note.status = normalize_status(payload.status)
+
+	try:
+		db.commit()
+		db.refresh(reception_note)
+	except Exception:
+		db.rollback()
+		raise
+
+	return serialize_reception_note(reception_note)
 
 
 def generate_reception_note_pdf(db: Session, reception_note_reference: int | str, principal: AuthPrincipal) -> tuple[str, bytes]:
@@ -153,6 +226,11 @@ def serialize_reception_note(reception_note: ReceptionNote) -> ReceptionNoteResp
 		producingCompanyContactPerson=reception_note.producing_company_contact_person,
 		producingCompanyOfficePhone=reception_note.producing_company_office_phone,
 		producingCompanyEmail=reception_note.producing_company_email,
+		referringCompany=reception_note.referring_company,
+		projectName=reception_note.project_name,
+		projectNumber=reception_note.project_number,
+		projectLocation=reception_note.project_location,
+		projectCustomFields=reception_note.project_custom_fields,
 		transportingCompanyName=reception_note.transporting_company_name,
 		transportingCompanyContactPerson=reception_note.transporting_company_contact_person,
 		transportingCompanyOfficePhone=reception_note.transporting_company_office_phone,
@@ -164,6 +242,7 @@ def serialize_reception_note(reception_note: ReceptionNote) -> ReceptionNoteResp
 		wasteStreamQuantity=reception_note.waste_stream_quantity,
 		rnIssuedBy=reception_note.rn_issued_by,
 		status=normalize_status(reception_note.status),
+		isDeleted=bool(reception_note.is_deleted),
 	)
 
 
