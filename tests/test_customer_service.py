@@ -31,6 +31,7 @@ def test_export_customers_csv_includes_exact_columns_in_order(monkeypatch) -> No
 				area="Jebel Ali",
 				officeAddress="Plot 10",
 				website="acme.example",
+				companyEmail=None,
 				sector="Recycling",
 				contactPersonName="Jane Doe",
 				contactPersonPosition="Manager",
@@ -51,18 +52,22 @@ def test_export_customers_csv_includes_exact_columns_in_order(monkeypatch) -> No
 	assert filename == "customers-export.csv"
 	assert reader.fieldnames == customer_service.CUSTOMER_CSV_COLUMNS
 	assert rows == [{
+		"Customer ID Date": "2026-04-01",
+		"Customer ID": "CID-0001",
 		"Company Name": "Acme Recycling",
 		"Emirate": "Dubai",
 		"Area": "Jebel Ali",
 		"Office Location": "Plot 10",
 		"Website": "acme.example",
+		"Company Email": "",
 		"Sector": "Recycling",
-		"Contact Person": "Jane Doe",
-		"Position": "Manager",
-		"Department": "Operations",
-		"Email": "jane@example.com",
+		"Focal Person Name": "Jane Doe",
+		"Focal Person Position": "Manager",
+		"Focal Person Department": "Operations",
+		"Focal Person Email": "jane@example.com",
 		"Office Phone": "111",
 		"Mobile Phone": "222",
+		"Last Active": "Today, 10:30",
 	}]
 
 
@@ -129,6 +134,7 @@ def test_get_customer_profile_returns_company_name_from_customer_record(monkeypa
 		area="JAFZA",
 		office_address="Office 7",
 		website="cpco3.example",
+		company_email=None,
 		sector="Recycling",
 		contact_person_name="Jane Doe",
 		contact_person_position="Manager",

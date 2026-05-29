@@ -15,18 +15,22 @@ CUSTOMER_ID_PATTERN = re.compile(r"CID-(\d+)")
 CUSTOMER_AUTH_DISABLED = "CUSTOMER_AUTH_DISABLED"
 NO_CUSTOMER_USER_ACTIVITY = "No user access yet"
 CUSTOMER_CSV_COLUMNS = [
+	"Customer ID Date",
+	"Customer ID",
 	"Company Name",
 	"Emirate",
 	"Area",
 	"Office Location",
 	"Website",
+	"Company Email",
 	"Sector",
-	"Contact Person",
-	"Position",
-	"Department",
-	"Email",
+	"Focal Person Name",
+	"Focal Person Position",
+	"Focal Person Department",
+	"Focal Person Email",
 	"Office Phone",
 	"Mobile Phone",
+	"Last Active",
 ]
 
 
@@ -79,6 +83,7 @@ def create_customer(db: Session, payload: CustomerCreate) -> CustomerResponse:
 	area = payload.area.strip()
 	office_address = payload.officeLocation.strip()
 	website = payload.website.strip().lower()
+	company_email = str(payload.companyEmail or "").strip().lower() or None
 	sector = payload.sector.strip()
 	customer_id_date = normalize_date_for_storage(payload.customerIdDate, "Customer ID Date")
 	customer_id = generate_next_customer_id(db)
@@ -113,6 +118,7 @@ def create_customer(db: Session, payload: CustomerCreate) -> CustomerResponse:
 		area=area,
 		office_address=office_address,
 		website=website,
+		company_email=company_email,
 		sector=sector,
 		contact_person_name=primary_focal_person.name,
 		contact_person_position=primary_focal_person.position,
@@ -141,6 +147,7 @@ def update_customer(db: Session, customer_id: str, payload: CustomerUpdate) -> C
 	area = payload.area.strip()
 	office_address = payload.officeLocation.strip()
 	website = payload.website.strip().lower()
+	company_email = str(payload.companyEmail or "").strip().lower() or None
 	sector = payload.sector.strip()
 	focal_people = normalize_focal_people(payload.focalPersons)
 	primary_focal_person = focal_people[0]
@@ -170,6 +177,7 @@ def update_customer(db: Session, customer_id: str, payload: CustomerUpdate) -> C
 	customer.area = area
 	customer.office_address = office_address
 	customer.website = website
+	customer.company_email = company_email
 	customer.sector = sector
 	customer.contact_person_name = primary_focal_person.name
 	customer.contact_person_position = primary_focal_person.position
@@ -241,6 +249,7 @@ def serialize_customer(customer: Customer) -> CustomerResponse:
 		area=customer.area,
 		officeAddress=customer.office_address,
 		website=customer.website,
+		companyEmail=customer.company_email or "",
 		sector=customer.sector,
 		contactPersonName=primary_focal_person.name,
 		contactPersonPosition=primary_focal_person.position,
@@ -268,18 +277,22 @@ def filter_customers_for_export(
 
 def serialize_customer_csv_row(customer: CustomerResponse) -> dict[str, str]:
 	return {
+		"Customer ID Date": customer.customerIdDate,
+		"Customer ID": customer.customerId,
 		"Company Name": customer.companyName,
 		"Emirate": customer.companyEmirate,
 		"Area": customer.area,
 		"Office Location": customer.officeAddress,
 		"Website": customer.website,
+		"Company Email": customer.companyEmail or "",
 		"Sector": customer.sector,
-		"Contact Person": customer.contactPersonName,
-		"Position": customer.contactPersonPosition,
-		"Department": customer.contactPersonDepartment,
-		"Email": customer.contactPersonEmail,
+		"Focal Person Name": customer.contactPersonName,
+		"Focal Person Position": customer.contactPersonPosition,
+		"Focal Person Department": customer.contactPersonDepartment,
+		"Focal Person Email": customer.contactPersonEmail,
 		"Office Phone": customer.contactPersonOfficePhone,
 		"Mobile Phone": customer.contactPersonMobilePhone,
+		"Last Active": customer.lastActive,
 	}
 
 

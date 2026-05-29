@@ -256,6 +256,8 @@ def ensure_password_schema() -> None:
                 connection.execute(text("ALTER TABLE customers ADD COLUMN password_hash VARCHAR(255)"))
             if "focal_persons_json" not in customer_columns:
                 connection.execute(text("ALTER TABLE customers ADD COLUMN focal_persons_json TEXT DEFAULT '[]'"))
+            if "company_email" not in customer_columns:
+                connection.execute(text("ALTER TABLE customers ADD COLUMN company_email VARCHAR(255)"))
 
         crm_status_columns = {
             "crm_lab_statuses": {

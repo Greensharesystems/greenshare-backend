@@ -15,6 +15,7 @@ class Customer(Base):
 	area: Mapped[str] = mapped_column(String(120), nullable=False)
 	office_address: Mapped[str] = mapped_column(String(255), nullable=False)
 	website: Mapped[str] = mapped_column(String(255), nullable=False)
+	company_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
 	sector: Mapped[str] = mapped_column(String(120), nullable=False)
 	contact_person_name: Mapped[str] = mapped_column(String(255), nullable=False)
 	contact_person_position: Mapped[str] = mapped_column(String(120), nullable=False)
