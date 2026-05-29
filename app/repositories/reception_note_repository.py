@@ -1,18 +1,24 @@
-from sqlalchemy import select
+from datetime import datetime, timezone
+
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models.reception_note import ReceptionNote
 
 
+def _active():
+	return or_(ReceptionNote.is_deleted.is_(False), ReceptionNote.is_deleted.is_(None))
+
+
 def get_reception_notes(db: Session) -> list[ReceptionNote]:
-	statement = select(ReceptionNote).order_by(ReceptionNote.created_at.desc(), ReceptionNote.id.desc())
+	statement = select(ReceptionNote).where(_active()).order_by(ReceptionNote.created_at.desc(), ReceptionNote.id.desc())
 	return list(db.scalars(statement).all())
 
 
 def get_reception_notes_by_customer_id(db: Session, customer_id: str) -> list[ReceptionNote]:
 	statement = (
 		select(ReceptionNote)
-		.where(ReceptionNote.customer_id == customer_id)
+		.where(ReceptionNote.customer_id == customer_id, _active())
 		.order_by(ReceptionNote.created_at.desc(), ReceptionNote.id.desc())
 	)
 	return list(db.scalars(statement).all())
@@ -21,7 +27,7 @@ def get_reception_notes_by_customer_id(db: Session, customer_id: str) -> list[Re
 def get_reception_notes_by_owner_identifier(db: Session, owner_identifier: str) -> list[ReceptionNote]:
 	statement = (
 		select(ReceptionNote)
-		.where(ReceptionNote.owner_identifier == owner_identifier)
+		.where(ReceptionNote.owner_identifier == owner_identifier, _active())
 		.order_by(ReceptionNote.created_at.desc(), ReceptionNote.id.desc())
 	)
 	return list(db.scalars(statement).all())
@@ -33,12 +39,12 @@ def get_reception_note_ids(db: Session) -> list[str]:
 
 
 def get_reception_note_by_rnid(db: Session, rnid: str) -> ReceptionNote | None:
-	statement = select(ReceptionNote).where(ReceptionNote.rnid.in_(get_rnid_aliases(rnid)))
+	statement = select(ReceptionNote).where(ReceptionNote.rnid.in_(get_rnid_aliases(rnid)), _active())
 	return db.scalar(statement)
 
 
 def get_reception_note_by_id(db: Session, reception_note_id: int) -> ReceptionNote | None:
-	statement = select(ReceptionNote).where(ReceptionNote.id == reception_note_id)
+	statement = select(ReceptionNote).where(ReceptionNote.id == reception_note_id, _active())
 	return db.scalar(statement)
 
 
@@ -51,6 +57,12 @@ def create_reception_note(db: Session, reception_note: ReceptionNote) -> Recepti
 
 def delete_reception_note(db: Session, reception_note: ReceptionNote) -> None:
 	db.delete(reception_note)
+
+
+def soft_delete_reception_note(db: Session, reception_note: ReceptionNote, deleted_by: str) -> None:
+	reception_note.is_deleted = True
+	reception_note.deleted_at = datetime.now(timezone.utc)
+	reception_note.deleted_by = deleted_by
 
 
 def get_rnid_aliases(rnid: str) -> list[str]:

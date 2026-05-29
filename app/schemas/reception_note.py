@@ -25,6 +25,11 @@ class ReceptionNoteCreate(BaseModel):
 	producingCompanyContactPerson: str = ""
 	producingCompanyOfficePhone: str = ""
 	producingCompanyEmail: str = ""
+	referringCompany: str | None = None
+	projectName: str | None = None
+	projectNumber: str | None = None
+	projectLocation: str | None = None
+	projectCustomFields: list[dict[str, str]] | None = None
 	transportingCompanyName: str = ""
 	transportingCompanyContactPerson: str = ""
 	transportingCompanyOfficePhone: str = ""
@@ -36,6 +41,34 @@ class ReceptionNoteCreate(BaseModel):
 	wasteStreamQuantity: str = ""
 	rnIssuedBy: str = ""
 	status: str = "Issued"
+
+
+class ReceptionNoteUpdate(BaseModel):
+	rnidDate: str | None = None
+	weighBridgeSlipDate: str | None = None
+	weighBridgeBillNo: str | None = None
+	producingCompanyName: str | None = None
+	producingCompanyEmirate: str | None = None
+	producingCompanyOfficeAddress: str | None = None
+	producingCompanyContactPerson: str | None = None
+	producingCompanyOfficePhone: str | None = None
+	producingCompanyEmail: str | None = None
+	referringCompany: str | None = None
+	projectName: str | None = None
+	projectNumber: str | None = None
+	projectLocation: str | None = None
+	projectCustomFields: list[dict[str, str]] | None = None
+	transportingCompanyName: str | None = None
+	transportingCompanyContactPerson: str | None = None
+	transportingCompanyOfficePhone: str | None = None
+	transportingCompanyEmail: str | None = None
+	wasteStreams: list[ReceptionNoteWasteStream] | None = None
+	vehiclePlateNo: str | None = None
+	driverName: str | None = None
+	wasteStreamName: str | None = None
+	wasteStreamQuantity: str | None = None
+	rnIssuedBy: str | None = None
+	status: str | None = None
 
 
 class NextReceptionNoteIdResponse(BaseModel):
@@ -57,6 +90,11 @@ class ReceptionNoteResponse(BaseModel):
 	producingCompanyContactPerson: str
 	producingCompanyOfficePhone: str
 	producingCompanyEmail: str
+	referringCompany: str | None = None
+	projectName: str | None = None
+	projectNumber: str | None = None
+	projectLocation: str | None = None
+	projectCustomFields: list[dict[str, str]] | None = None
 	transportingCompanyName: str
 	transportingCompanyContactPerson: str
 	transportingCompanyOfficePhone: str
@@ -68,3 +106,4 @@ class ReceptionNoteResponse(BaseModel):
 	wasteStreamQuantity: str
 	rnIssuedBy: str
 	status: str
+	isDeleted: bool = False

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import AuthPrincipal, get_current_principal, require_roles
 from app.db.database import get_db
-from app.schemas.reception_note import NextReceptionNoteIdResponse, ReceptionNoteCreate, ReceptionNoteResponse
+from app.schemas.reception_note import NextReceptionNoteIdResponse, ReceptionNoteCreate, ReceptionNoteResponse, ReceptionNoteUpdate
 from app.services import reception_note_service
 
 
@@ -100,11 +100,24 @@ def build_reception_note_pdf_response(
 	)
 
 
+@router.put("/{rnid}", response_model=ReceptionNoteResponse)
+def update_reception_note(
+	rnid: str,
+	payload: ReceptionNoteUpdate,
+	db: Session = Depends(get_db),
+	current_user: AuthPrincipal = Depends(require_roles("admin", "employee")),
+) -> ReceptionNoteResponse:
+	try:
+		return reception_note_service.update_reception_note(db, rnid, payload, current_user)
+	except ValueError as exc:
+		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
 @router.delete("/{rnid}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_reception_note(
 	rnid: str,
 	db: Session = Depends(get_db),
-	current_user: AuthPrincipal = Depends(require_roles("admin", "employee")),
+	current_user: AuthPrincipal = Depends(require_roles("admin")),
 ) -> Response:
 	try:
 		reception_note_service.delete_reception_note(db, rnid, current_user)

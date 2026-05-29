@@ -308,6 +308,25 @@ def ensure_password_schema() -> None:
             if "deleted_at" not in crm_leads_columns:
                 connection.execute(text("ALTER TABLE crm_leads ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE"))
 
+        if "reception_notes" in existing_tables:
+            rn_columns = {column["name"] for column in inspect(engine).get_columns("reception_notes")}
+            if "referring_company" not in rn_columns:
+                connection.execute(text("ALTER TABLE reception_notes ADD COLUMN referring_company VARCHAR(255)"))
+            if "project_name" not in rn_columns:
+                connection.execute(text("ALTER TABLE reception_notes ADD COLUMN project_name VARCHAR(255)"))
+            if "project_number" not in rn_columns:
+                connection.execute(text("ALTER TABLE reception_notes ADD COLUMN project_number VARCHAR(128)"))
+            if "project_location" not in rn_columns:
+                connection.execute(text("ALTER TABLE reception_notes ADD COLUMN project_location VARCHAR(255)"))
+            if "project_custom_fields" not in rn_columns:
+                connection.execute(text("ALTER TABLE reception_notes ADD COLUMN project_custom_fields JSON"))
+            if "is_deleted" not in rn_columns:
+                connection.execute(text("ALTER TABLE reception_notes ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE"))
+            if "deleted_at" not in rn_columns:
+                connection.execute(text("ALTER TABLE reception_notes ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE"))
+            if "deleted_by" not in rn_columns:
+                connection.execute(text("ALTER TABLE reception_notes ADD COLUMN deleted_by VARCHAR(255)"))
+
     with SessionLocal() as db:
         should_commit = False
 
