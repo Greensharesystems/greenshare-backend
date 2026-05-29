@@ -302,6 +302,28 @@ def ensure_password_schema() -> None:
                 connection.execute(
                     text("ALTER TABLE circularity_certificates ADD COLUMN secondary_ecosystem_details JSON DEFAULT '{}'"),
                 )
+            if "referring_company" not in circularity_columns:
+                connection.execute(text("ALTER TABLE circularity_certificates ADD COLUMN referring_company VARCHAR(255)"))
+            if "project_name" not in circularity_columns:
+                connection.execute(text("ALTER TABLE circularity_certificates ADD COLUMN project_name VARCHAR(255)"))
+            if "project_number" not in circularity_columns:
+                connection.execute(text("ALTER TABLE circularity_certificates ADD COLUMN project_number VARCHAR(128)"))
+            if "project_location" not in circularity_columns:
+                connection.execute(text("ALTER TABLE circularity_certificates ADD COLUMN project_location VARCHAR(255)"))
+            if "project_custom_fields" not in circularity_columns:
+                connection.execute(text("ALTER TABLE circularity_certificates ADD COLUMN project_custom_fields JSON"))
+            if "waste_stream_name" not in circularity_columns:
+                connection.execute(text("ALTER TABLE circularity_certificates ADD COLUMN waste_stream_name VARCHAR(255)"))
+            if "waste_stream_class" not in circularity_columns:
+                connection.execute(text("ALTER TABLE circularity_certificates ADD COLUMN waste_stream_class VARCHAR(255)"))
+            if "verification_comments" not in circularity_columns:
+                connection.execute(text("ALTER TABLE circularity_certificates ADD COLUMN verification_comments TEXT"))
+            if "is_deleted" not in circularity_columns:
+                connection.execute(text("ALTER TABLE circularity_certificates ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE"))
+            if "deleted_at" not in circularity_columns:
+                connection.execute(text("ALTER TABLE circularity_certificates ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE"))
+            if "deleted_by" not in circularity_columns:
+                connection.execute(text("ALTER TABLE circularity_certificates ADD COLUMN deleted_by VARCHAR(255)"))
 
         if "crm_leads" in existing_tables:
             crm_leads_columns = {column["name"] for column in inspect(engine).get_columns("crm_leads")}

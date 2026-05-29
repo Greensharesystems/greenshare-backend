@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -5,7 +7,11 @@ from app.models.circularity_certificate import CircularityCertificate
 
 
 def get_circularity_certificates(db: Session) -> list[CircularityCertificate]:
-	statement = select(CircularityCertificate).order_by(CircularityCertificate.created_at.desc(), CircularityCertificate.id.desc())
+	statement = (
+		select(CircularityCertificate)
+		.where(CircularityCertificate.is_deleted.is_(False))
+		.order_by(CircularityCertificate.created_at.desc(), CircularityCertificate.id.desc())
+	)
 	return list(db.scalars(statement).all())
 
 
@@ -13,6 +19,7 @@ def get_circularity_certificates_by_customer_id(db: Session, customer_id: str) -
 	statement = (
 		select(CircularityCertificate)
 		.where(CircularityCertificate.cid == customer_id)
+		.where(CircularityCertificate.is_deleted.is_(False))
 		.order_by(CircularityCertificate.created_at.desc(), CircularityCertificate.id.desc())
 	)
 	return list(db.scalars(statement).all())
@@ -22,6 +29,7 @@ def get_circularity_certificates_by_owner_identifier(db: Session, owner_identifi
 	statement = (
 		select(CircularityCertificate)
 		.where(CircularityCertificate.owner_identifier == owner_identifier)
+		.where(CircularityCertificate.is_deleted.is_(False))
 		.order_by(CircularityCertificate.created_at.desc(), CircularityCertificate.id.desc())
 	)
 	return list(db.scalars(statement).all())
@@ -51,6 +59,16 @@ def create_circularity_certificate(db: Session, circularity_certificate: Circula
 
 def delete_circularity_certificate(db: Session, circularity_certificate: CircularityCertificate) -> None:
 	db.delete(circularity_certificate)
+
+
+def soft_delete_circularity_certificate(
+	db: Session,
+	circularity_certificate: CircularityCertificate,
+	deleted_by: str,
+) -> None:
+	circularity_certificate.is_deleted = True
+	circularity_certificate.deleted_at = datetime.now(timezone.utc)
+	circularity_certificate.deleted_by = deleted_by
 
 
 def get_ccid_aliases(ccid: str) -> list[str]:
