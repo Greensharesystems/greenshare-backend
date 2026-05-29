@@ -1,18 +1,28 @@
-from sqlalchemy import select
+from datetime import datetime, timezone
+
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models.reception_certificate import ReceptionCertificate
 
 
+def _active_filter():
+	return or_(ReceptionCertificate.is_deleted.is_(None), ReceptionCertificate.is_deleted == False)  # noqa: E712
+
+
 def get_reception_certificates(db: Session) -> list[ReceptionCertificate]:
-	statement = select(ReceptionCertificate).order_by(ReceptionCertificate.created_at.desc(), ReceptionCertificate.id.desc())
+	statement = (
+		select(ReceptionCertificate)
+		.where(_active_filter())
+		.order_by(ReceptionCertificate.created_at.desc(), ReceptionCertificate.id.desc())
+	)
 	return list(db.scalars(statement).all())
 
 
 def get_reception_certificates_by_customer_id(db: Session, customer_id: str) -> list[ReceptionCertificate]:
 	statement = (
 		select(ReceptionCertificate)
-		.where(ReceptionCertificate.customer_id == customer_id)
+		.where(ReceptionCertificate.customer_id == customer_id, _active_filter())
 		.order_by(ReceptionCertificate.created_at.desc(), ReceptionCertificate.id.desc())
 	)
 	return list(db.scalars(statement).all())
@@ -21,7 +31,7 @@ def get_reception_certificates_by_customer_id(db: Session, customer_id: str) -> 
 def get_reception_certificates_by_owner_identifier(db: Session, owner_identifier: str) -> list[ReceptionCertificate]:
 	statement = (
 		select(ReceptionCertificate)
-		.where(ReceptionCertificate.owner_identifier == owner_identifier)
+		.where(ReceptionCertificate.owner_identifier == owner_identifier, _active_filter())
 		.order_by(ReceptionCertificate.created_at.desc(), ReceptionCertificate.id.desc())
 	)
 	return list(db.scalars(statement).all())
@@ -51,6 +61,12 @@ def create_reception_certificate(db: Session, reception_certificate: ReceptionCe
 
 def delete_reception_certificate(db: Session, reception_certificate: ReceptionCertificate) -> None:
 	db.delete(reception_certificate)
+
+
+def soft_delete_reception_certificate(db: Session, reception_certificate: ReceptionCertificate, deleted_by: str) -> None:
+	reception_certificate.is_deleted = True
+	reception_certificate.deleted_at = datetime.now(timezone.utc)
+	reception_certificate.deleted_by = deleted_by
 
 
 def get_rcid_aliases(rcid: str) -> list[str]:
