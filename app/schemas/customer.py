@@ -22,6 +22,7 @@ class CustomerCreate(BaseModel):
 	area: str
 	officeLocation: str
 	website: str
+	companyEmail: str | None = None
 	sector: str
 	contactName: str | None = None
 	contactPosition: str | None = None
@@ -38,6 +39,7 @@ class CustomerUpdate(BaseModel):
 	area: str
 	officeLocation: str
 	website: str
+	companyEmail: str | None = None
 	sector: str
 	focalPersons: list[FocalPersonInput] = Field(default_factory=list)
 
@@ -57,6 +59,7 @@ class CustomerResponse(BaseModel):
 	area: str
 	officeAddress: str
 	website: str
+	companyEmail: str | None = None
 	sector: str
 	contactPersonName: str
 	contactPersonPosition: str
