@@ -59,6 +59,19 @@ def create_circularity_certificate(db: Session, payload: CircularityCertificateC
 	if circularity_certificate_repository.get_circularity_certificate_by_ccid(db, ccid):
 		raise ValueError("That circularity certificate ID is already in use.")
 
+	# Auto-populate project/referring fields from linked reception notes via linked RCs
+	auto_referring_company, auto_project_name, auto_project_number, auto_project_location, auto_project_custom_fields = (
+		get_project_fields_from_linked_certificates(db, linked_reception_certificates)
+	)
+
+	# Denormalize waste stream summary from linked RCs
+	auto_waste_stream_name = join_unique_values(
+		[str(certificate.waste_stream_name or "").strip() for certificate in linked_reception_certificates],
+	) or None
+	auto_waste_stream_class = join_unique_values(
+		[str(certificate.waste_stream_class or "").strip() for certificate in linked_reception_certificates],
+	) or None
+
 	circularity_certificate = CircularityCertificate(
 		ccid_date=ccid_date,
 		ccid=ccid,
@@ -66,13 +79,21 @@ def create_circularity_certificate(db: Session, payload: CircularityCertificateC
 		linked_rcids=linked_rcids,
 		cid=next(iter(customer_ids)),
 		producing_company_name=linked_reception_certificates[0].producing_company_name,
+		referring_company=payload.referringCompany or auto_referring_company,
+		project_name=payload.projectName or auto_project_name,
+		project_number=payload.projectNumber or auto_project_number,
+		project_location=payload.projectLocation or auto_project_location,
+		project_custom_fields=payload.projectCustomFields if payload.projectCustomFields is not None else auto_project_custom_fields,
 		waste_stream_quantity=join_unique_values(
 			[certificate.waste_stream_quantity for certificate in linked_reception_certificates if certificate.waste_stream_quantity.strip()],
 		),
+		waste_stream_name=auto_waste_stream_name,
+		waste_stream_class=auto_waste_stream_class,
 		secondary_ecosystem_details=secondary_ecosystem_details,
 		secondary_product=secondary_product,
 		secondary_loop=secondary_loop,
 		issued_by=issued_by,
+		verification_comments=payload.verificationComments,
 		owner_identifier=principal.identifier,
 		owner_role=principal.role,
 		status=normalize_status(payload.status),
@@ -93,7 +114,7 @@ def delete_circularity_certificate(db: Session, ccid: str, principal: AuthPrinci
 		raise ValueError("That circularity certificate could not be found.")
 
 	try:
-		circularity_certificate_repository.delete_circularity_certificate(db, circularity_certificate)
+		circularity_certificate_repository.soft_delete_circularity_certificate(db, circularity_certificate, principal.identifier)
 		db.commit()
 	except Exception:
 		db.rollback()
@@ -165,7 +186,14 @@ def serialize_circularity_certificate(circularity_certificate: CircularityCertif
 		linkedRcids=list(circularity_certificate.linked_rcids or []),
 		cid=circularity_certificate.cid,
 		producingCompanyName=circularity_certificate.producing_company_name,
+		referringCompany=circularity_certificate.referring_company,
+		projectName=circularity_certificate.project_name,
+		projectNumber=circularity_certificate.project_number,
+		projectLocation=circularity_certificate.project_location,
+		projectCustomFields=list(circularity_certificate.project_custom_fields) if circularity_certificate.project_custom_fields else None,
 		wasteStreamQuantity=circularity_certificate.waste_stream_quantity,
+		wasteStreamName=circularity_certificate.waste_stream_name,
+		wasteStreamClass=circularity_certificate.waste_stream_class,
 		secondaryProduct=circularity_certificate.secondary_product,
 		secondaryLoop=circularity_certificate.secondary_loop,
 		secondaryEcosystemDetails=normalize_stored_secondary_ecosystem_details(
@@ -174,6 +202,7 @@ def serialize_circularity_certificate(circularity_certificate: CircularityCertif
 			circularity_certificate.secondary_loop,
 		),
 		issuedBy=circularity_certificate.issued_by,
+		verificationComments=circularity_certificate.verification_comments,
 		status=normalize_status(circularity_certificate.status),
 	)
 
@@ -196,6 +225,58 @@ def get_linked_reception_certificates(db: Session, linked_rcids: list[str], prin
 		reception_certificates.append(reception_certificate)
 
 	return reception_certificates
+
+
+def get_project_fields_from_linked_certificates(
+	db: Session,
+	linked_reception_certificates: list,
+) -> tuple[str | None, str | None, str | None, str | None, list[dict] | None]:
+	"""Return (referring_company, project_name, project_number, project_location, project_custom_fields)
+	sourced from the first linked reception note that has each value.
+	CC → linked RCIDs → linked RNIDs → ReceptionNote project fields.
+	"""
+	referring_company: str | None = None
+	project_name: str | None = None
+	project_number: str | None = None
+	project_location: str | None = None
+	project_custom_fields: list[dict] | None = None
+
+	for rc in linked_reception_certificates:
+		# Try RC-level fields first (denormalized from RN at RC creation time)
+		if referring_company is None and rc.referring_company:
+			referring_company = rc.referring_company
+		if project_name is None and rc.project_name:
+			project_name = rc.project_name
+		if project_number is None and rc.project_number:
+			project_number = rc.project_number
+		if project_location is None and rc.project_location:
+			project_location = rc.project_location
+		if project_custom_fields is None and rc.project_custom_fields:
+			project_custom_fields = list(rc.project_custom_fields)
+
+		# If still missing, trace to linked RNs
+		if all(v is not None for v in [referring_company, project_name, project_number, project_location, project_custom_fields]):
+			break
+
+		linked_rnids = get_linked_rnids_from_reception_certificate(rc)
+		for rnid in linked_rnids:
+			rn = reception_note_repository.get_reception_note_by_rnid(db, rnid)
+			if rn is None:
+				continue
+			if referring_company is None and rn.referring_company:
+				referring_company = rn.referring_company
+			if project_name is None and rn.project_name:
+				project_name = rn.project_name
+			if project_number is None and rn.project_number:
+				project_number = rn.project_number
+			if project_location is None and rn.project_location:
+				project_location = rn.project_location
+			if project_custom_fields is None and rn.project_custom_fields:
+				project_custom_fields = list(rn.project_custom_fields)
+			if all(v is not None for v in [referring_company, project_name, project_number, project_location, project_custom_fields]):
+				break
+
+	return referring_company, project_name, project_number, project_location, project_custom_fields
 
 
 def get_visible_circularity_certificates(db: Session, principal: AuthPrincipal) -> list[CircularityCertificate]:

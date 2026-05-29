@@ -28,11 +28,17 @@ class CircularityCertificateCreate(BaseModel):
 	linkedRcids: list[str] = Field(default_factory=list)
 	cid: str = ""
 	producingCompanyName: str = ""
+	referringCompany: str | None = None
+	projectName: str | None = None
+	projectNumber: str | None = None
+	projectLocation: str | None = None
+	projectCustomFields: list[dict] | None = None
 	wasteStreamQuantity: str = ""
 	secondaryProduct: str = ""
 	secondaryLoop: str = ""
 	secondaryEcosystemDetails: CircularitySecondaryEcosystemDetails = Field(default_factory=CircularitySecondaryEcosystemDetails)
 	issuedBy: str = ""
+	verificationComments: str | None = None
 	status: str = "Issued"
 
 
@@ -50,9 +56,17 @@ class CircularityCertificateResponse(BaseModel):
 	linkedRcids: list[str]
 	cid: str
 	producingCompanyName: str
+	referringCompany: str | None = None
+	projectName: str | None = None
+	projectNumber: str | None = None
+	projectLocation: str | None = None
+	projectCustomFields: list[dict] | None = None
 	wasteStreamQuantity: str
+	wasteStreamName: str | None = None
+	wasteStreamClass: str | None = None
 	secondaryProduct: str
 	secondaryLoop: str
 	secondaryEcosystemDetails: CircularitySecondaryEcosystemDetails = Field(default_factory=CircularitySecondaryEcosystemDetails)
 	issuedBy: str
+	verificationComments: str | None = None
 	status: str
