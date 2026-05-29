@@ -9,6 +9,7 @@ from app.schemas.reception_certificate import (
 	NextReceptionCertificateIdResponse,
 	ReceptionCertificateCreate,
 	ReceptionCertificateResponse,
+	ReceptionCertificateUpdate,
 )
 from app.services import reception_certificate_service
 
@@ -106,6 +107,19 @@ def build_reception_certificate_pdf_response(
 		media_type="application/pdf",
 		headers={"Content-Disposition": f'{content_disposition}; filename="{filename}"'},
 	)
+
+
+@router.put("/{rcid}", response_model=ReceptionCertificateResponse)
+def update_reception_certificate(
+	rcid: str,
+	payload: ReceptionCertificateUpdate,
+	db: Session = Depends(get_db),
+	current_user: AuthPrincipal = Depends(require_roles("admin", "employee")),
+) -> ReceptionCertificateResponse:
+	try:
+		return reception_certificate_service.update_reception_certificate(db, rcid, payload, current_user)
+	except ValueError as exc:
+		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.delete("/{rcid}", status_code=status.HTTP_204_NO_CONTENT)

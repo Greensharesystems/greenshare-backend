@@ -11,6 +11,7 @@ from app.schemas.reception_certificate import (
 	NextReceptionCertificateIdResponse,
 	ReceptionCertificateCreate,
 	ReceptionCertificateResponse,
+	ReceptionCertificateUpdate,
 )
 from app.services.pdf_generation_service import generate_pdf
 
@@ -56,9 +57,17 @@ def create_reception_certificate(db: Session, payload: ReceptionCertificateCreat
 		linked_rnids=linked_rnids,
 		customer_id=next(iter(customer_ids)),
 		producing_company_name=linked_reception_notes[0].producing_company_name,
+		referring_company=payload.referringCompany if payload.referringCompany is not None else (linked_reception_notes[0].referring_company or None),
+		project_name=payload.projectName if payload.projectName is not None else (linked_reception_notes[0].project_name or None),
+		project_number=payload.projectNumber if payload.projectNumber is not None else (linked_reception_notes[0].project_number or None),
+		project_location=payload.projectLocation if payload.projectLocation is not None else (linked_reception_notes[0].project_location or None),
+		project_custom_fields=payload.projectCustomFields if payload.projectCustomFields is not None else (linked_reception_notes[0].project_custom_fields or None),
+		verification_comments=payload.verificationComments or None,
 		waste_stream_quantity=join_unique_values(
 			[note.waste_stream_quantity for note in linked_reception_notes if note.waste_stream_quantity.strip()],
 		),
+		waste_stream_name=get_primary_waste_stream_name(linked_reception_notes[0]),
+		waste_stream_class=get_primary_waste_stream_class(linked_reception_notes[0]),
 		rc_issued_by=rc_issued_by,
 		owner_identifier=principal.identifier,
 		owner_role=principal.role,
@@ -80,11 +89,50 @@ def delete_reception_certificate(db: Session, rcid: str, principal: AuthPrincipa
 		raise ValueError("That reception certificate could not be found.")
 
 	try:
-		reception_certificate_repository.delete_reception_certificate(db, reception_certificate)
+		reception_certificate_repository.soft_delete_reception_certificate(db, reception_certificate, principal.identifier)
 		db.commit()
 	except Exception:
 		db.rollback()
 		raise
+
+
+def update_reception_certificate(db: Session, rcid: str, payload: ReceptionCertificateUpdate, principal: AuthPrincipal) -> ReceptionCertificateResponse:
+	normalized_rcid = normalize_rcid(rcid)
+	reception_certificate = reception_certificate_repository.get_reception_certificate_by_rcid(db, normalized_rcid)
+
+	if reception_certificate is None:
+		raise ValueError("That reception certificate could not be found.")
+
+	if not can_access_reception_certificate(reception_certificate, principal):
+		raise ValueError("That reception certificate could not be found.")
+
+	if payload.rcidDate is not None:
+		reception_certificate.rcid_date = normalize_date_for_storage(payload.rcidDate, "Reception Certificate ID Date")
+	if payload.referringCompany is not None:
+		reception_certificate.referring_company = payload.referringCompany or None
+	if payload.projectName is not None:
+		reception_certificate.project_name = payload.projectName or None
+	if payload.projectNumber is not None:
+		reception_certificate.project_number = payload.projectNumber or None
+	if payload.projectLocation is not None:
+		reception_certificate.project_location = payload.projectLocation or None
+	if payload.projectCustomFields is not None:
+		reception_certificate.project_custom_fields = payload.projectCustomFields or None
+	if payload.verificationComments is not None:
+		reception_certificate.verification_comments = payload.verificationComments or None
+	if payload.rcIssuedBy is not None:
+		reception_certificate.rc_issued_by = payload.rcIssuedBy.strip()
+	if payload.status is not None:
+		reception_certificate.status = normalize_status(payload.status)
+
+	try:
+		db.commit()
+		db.refresh(reception_certificate)
+	except Exception:
+		db.rollback()
+		raise
+
+	return serialize_reception_certificate(reception_certificate)
 
 
 def generate_reception_certificate_pdf(
@@ -152,9 +200,18 @@ def serialize_reception_certificate(reception_certificate: ReceptionCertificate)
 		linkedRnids=list(reception_certificate.linked_rnids or []),
 		customerId=reception_certificate.customer_id,
 		producingCompanyName=reception_certificate.producing_company_name,
+		referringCompany=reception_certificate.referring_company,
+		projectName=reception_certificate.project_name,
+		projectNumber=reception_certificate.project_number,
+		projectLocation=reception_certificate.project_location,
+		projectCustomFields=reception_certificate.project_custom_fields,
+		verificationComments=reception_certificate.verification_comments,
 		wasteStreamQuantity=reception_certificate.waste_stream_quantity,
+		wasteStreamName=reception_certificate.waste_stream_name,
+		wasteStreamClass=reception_certificate.waste_stream_class,
 		rcIssuedBy=reception_certificate.rc_issued_by,
 		status=normalize_status(reception_certificate.status),
+		isDeleted=bool(reception_certificate.is_deleted),
 	)
 
 
@@ -296,6 +353,20 @@ def join_unique_values(values: list[str]) -> str:
 			seen_values.append(normalized_value)
 
 	return ", ".join(seen_values)
+
+
+def get_primary_waste_stream_name(reception_note) -> str | None:
+	streams = reception_note.waste_streams or []
+	if not streams:
+		return None
+	return str(streams[0].get("name", "")).strip() or None
+
+
+def get_primary_waste_stream_class(reception_note) -> str | None:
+	streams = reception_note.waste_streams or []
+	if not streams:
+		return None
+	return str(streams[0].get("wasteClass", "")).strip() or None
 
 
 PDF_VERIFIED_BY = "Imran Gill"
