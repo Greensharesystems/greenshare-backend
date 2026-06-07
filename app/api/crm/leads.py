@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthPrincipal, require_roles
@@ -49,6 +50,8 @@ def create_lead(
 		return lead_service.create_lead(db, payload)
 	except ValueError as exc:
 		raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+	except IntegrityError:
+		raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A lead with that Lead ID already exists.") from None
 
 
 @router.put("/{lid}", response_model=LeadResponse)

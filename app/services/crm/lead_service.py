@@ -40,7 +40,7 @@ def get_lead_model_by_lid(db: Session, lid: str) -> Lead:
 
 def create_lead(db: Session, payload: LeadCreate) -> LeadResponse:
 	lid = normalize_lid(payload.lid)
-	if lead_repository.get_lead_by_lid(db, lid) is not None:
+	if lead_repository.lid_exists(db, lid):
 		raise ValueError("That Lead ID already exists.")
 
 	lead = Lead(
