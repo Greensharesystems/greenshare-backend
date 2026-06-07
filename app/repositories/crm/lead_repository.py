@@ -11,6 +11,7 @@ def get_leads(db: Session) -> list[Lead]:
 			selectinload(Lead.lab_status),
 			selectinload(Lead.proposal_status),
 			selectinload(Lead.lead_status),
+			selectinload(Lead.wds_status),
 		)
 		.where(Lead.deleted_at.is_(None))
 		.order_by(Lead.created_at.desc(), Lead.id.desc())
@@ -25,6 +26,7 @@ def get_lead_by_lid(db: Session, lid: str) -> Lead | None:
 			selectinload(Lead.lab_status),
 			selectinload(Lead.proposal_status),
 			selectinload(Lead.lead_status),
+			selectinload(Lead.wds_status),
 		)
 		.where(Lead.lid == lid)
 		.where(Lead.deleted_at.is_(None))
@@ -32,8 +34,15 @@ def get_lead_by_lid(db: Session, lid: str) -> Lead | None:
 	return db.scalar(statement)
 
 
+def lid_exists(db: Session, lid: str) -> bool:
+	"""Check if a LID exists in the table, including soft-deleted rows."""
+	statement = select(Lead.lid).where(Lead.lid == lid).limit(1)
+	return db.scalar(statement) is not None
+
+
 def get_lead_lids(db: Session) -> list[str]:
-	statement = select(Lead.lid).where(Lead.deleted_at.is_(None))
+	"""Return all LIDs including soft-deleted, so next-ID generation skips used IDs."""
+	statement = select(Lead.lid)
 	return [lid for lid in db.scalars(statement).all() if lid]
 
 

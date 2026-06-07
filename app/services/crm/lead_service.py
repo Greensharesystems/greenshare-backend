@@ -40,7 +40,7 @@ def get_lead_model_by_lid(db: Session, lid: str) -> Lead:
 
 def create_lead(db: Session, payload: LeadCreate) -> LeadResponse:
 	lid = normalize_lid(payload.lid)
-	if lead_repository.get_lead_by_lid(db, lid) is not None:
+	if lead_repository.lid_exists(db, lid):
 		raise ValueError("That Lead ID already exists.")
 
 	lead = Lead(
@@ -128,6 +128,12 @@ def serialize_lead(lead: Lead) -> LeadResponse:
 	proposal_status_days = calculate_elapsed_days(lead.lead_date, resolve_proposal_status_end_date(lead))
 	lead_status_days = calculate_elapsed_days(lead.lead_date, resolve_lead_status_end_date(lead))
 
+	wds = lead.wds_status
+	wds_date_submitted = wds.date_submitted if wds is not None else None
+	wds_date_approved = wds.date_approved if wds is not None else None
+	wds_status_value = _derive_wds_status(wds_date_submitted, wds_date_approved)
+	wds_days = _calculate_wds_days(wds_date_submitted, wds_date_approved)
+
 	return LeadResponse(
 		id=lead.id,
 		lid=lead.lid,
@@ -158,6 +164,10 @@ def serialize_lead(lead: Lead) -> LeadResponse:
 		lead_status=lead_status_value,
 		lead_status_days=lead_status_days,
 		lead_status_updated_at=format_timestamp_for_output(lead.lead_status.updated_at if lead.lead_status is not None else None, default_date),
+		wds_date_submitted=wds_date_submitted,
+		wds_status=wds_status_value,
+		wds_date_approved=wds_date_approved,
+		wds_status_days=wds_days,
 	)
 
 
@@ -246,3 +256,23 @@ def resolve_lead_status_end_date(lead: Lead) -> date:
 
 def get_current_date() -> date:
 	return datetime.utcnow().date()
+
+
+def _derive_wds_status(date_submitted: str | None, date_approved: str | None) -> str:
+	if not date_submitted:
+		return "N/A"
+	if date_approved:
+		return "Approved"
+	return "Open"
+
+
+def _calculate_wds_days(date_submitted: str | None, date_approved: str | None) -> int | None:
+	if not date_submitted:
+		return None
+	start = parse_supported_date(date_submitted)
+	if start is None:
+		return None
+	if date_approved:
+		end = parse_supported_date(date_approved)
+		return max(0, (end - start).days) if end is not None else None
+	return max(0, (get_current_date() - start).days)

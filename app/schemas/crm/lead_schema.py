@@ -70,6 +70,10 @@ class LeadResponse(BaseModel):
 	lead_status: str
 	lead_status_days: int
 	lead_status_updated_at: str
+	wds_date_submitted: str | None = None
+	wds_status: str
+	wds_date_approved: str | None = None
+	wds_status_days: int | None = None
 
 
 class LeadListResponse(LeadResponse):

@@ -18,6 +18,7 @@ from app.api.crm.lab_status import router as crm_lab_status_router
 from app.api.crm.leads import router as crm_leads_router
 from app.api.crm.lead_status import router as crm_lead_status_router
 from app.api.crm.proposal_status import router as crm_proposal_status_router
+from app.api.crm.wds_status import router as crm_wds_status_router
 from app.api.customers import router as customers_router
 from app.api.circularity_certificates import router as circularity_certificates_router
 from app.api.dashboard import customer_router as customer_dashboard_router, router as dashboard_router
@@ -32,6 +33,7 @@ from app.models.crm.lab_status import LabStatus
 from app.models.crm.lead import Lead
 from app.models.crm.lead_status import LeadStatus
 from app.models.crm.proposal_status import ProposalStatus
+from app.models.crm.wds_status import WdsStatus
 from app.models.circularity_certificate import CircularityCertificate
 from app.models.reception_certificate import ReceptionCertificate
 from app.models.reception_note import ReceptionNote
@@ -69,6 +71,7 @@ app.include_router(crm_leads_router)
 app.include_router(crm_lab_status_router)
 app.include_router(crm_proposal_status_router)
 app.include_router(crm_lead_status_router)
+app.include_router(crm_wds_status_router)
 app.include_router(reception_notes_router)
 app.include_router(reception_certificates_router)
 app.include_router(circularity_certificates_router)
