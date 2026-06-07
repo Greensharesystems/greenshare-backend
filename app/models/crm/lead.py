@@ -50,3 +50,9 @@ class Lead(Base):
 		cascade="all, delete-orphan",
 		uselist=False,
 	)
+	wds_status: Mapped["WdsStatus | None"] = relationship(
+		"WdsStatus",
+		back_populates="lead",
+		cascade="all, delete-orphan",
+		uselist=False,
+	)

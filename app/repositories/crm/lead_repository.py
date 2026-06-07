@@ -11,6 +11,7 @@ def get_leads(db: Session) -> list[Lead]:
 			selectinload(Lead.lab_status),
 			selectinload(Lead.proposal_status),
 			selectinload(Lead.lead_status),
+			selectinload(Lead.wds_status),
 		)
 		.where(Lead.deleted_at.is_(None))
 		.order_by(Lead.created_at.desc(), Lead.id.desc())
@@ -25,6 +26,7 @@ def get_lead_by_lid(db: Session, lid: str) -> Lead | None:
 			selectinload(Lead.lab_status),
 			selectinload(Lead.proposal_status),
 			selectinload(Lead.lead_status),
+			selectinload(Lead.wds_status),
 		)
 		.where(Lead.lid == lid)
 		.where(Lead.deleted_at.is_(None))
