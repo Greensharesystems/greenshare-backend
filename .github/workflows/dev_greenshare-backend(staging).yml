@@ -10,6 +10,10 @@ on:
       - dev
   workflow_dispatch:
 
+concurrency:
+  group: backend-dev-deploy
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
