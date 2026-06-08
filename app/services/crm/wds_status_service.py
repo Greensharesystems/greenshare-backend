@@ -46,6 +46,7 @@ def get_wds_status(db: Session, lid: str) -> WdsStatusResponse:
 			id=0,
 			lead_id=lead.id,
 			lid=lead.lid,
+			wds_no=None,
 			date_submitted=None,
 			date_approved=None,
 			status="N/A",
@@ -62,6 +63,7 @@ def get_wds_status(db: Session, lid: str) -> WdsStatusResponse:
 		id=record.id,
 		lead_id=record.lead_id,
 		lid=record.lid,
+		wds_no=record.wds_no,
 		date_submitted=record.date_submitted,
 		date_approved=record.date_approved,
 		status=status,
@@ -92,6 +94,7 @@ def update_wds_status(db: Session, lid: str, payload: WdsStatusCreateUpdate) -> 
 		record = WdsStatus(
 			lead_id=lead.id,
 			lid=lead.lid,
+			wds_no=normalize_optional_string(payload.wds_no),
 			date_submitted=date_submitted,
 			date_approved=date_approved,
 			comments=normalize_optional_string(payload.comments),
@@ -100,6 +103,7 @@ def update_wds_status(db: Session, lid: str, payload: WdsStatusCreateUpdate) -> 
 		record = wds_status_repository.create(db, record)
 	else:
 		record.lid = lead.lid
+		record.wds_no = normalize_optional_string(payload.wds_no)
 		record.date_submitted = date_submitted
 		record.date_approved = date_approved
 		record.comments = normalize_optional_string(payload.comments)
@@ -113,6 +117,7 @@ def update_wds_status(db: Session, lid: str, payload: WdsStatusCreateUpdate) -> 
 		id=record.id,
 		lead_id=record.lead_id,
 		lid=record.lid,
+		wds_no=record.wds_no,
 		date_submitted=record.date_submitted,
 		date_approved=record.date_approved,
 		status=status,

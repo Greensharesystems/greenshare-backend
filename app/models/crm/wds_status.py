@@ -10,6 +10,7 @@ class WdsStatus(Base):
 	id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
 	lead_id: Mapped[int] = mapped_column(ForeignKey("crm_leads.id", ondelete="CASCADE"), unique=True, index=True, nullable=False)
 	lid: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+	wds_no: Mapped[str | None] = mapped_column(String(64), nullable=True)
 	date_submitted: Mapped[str | None] = mapped_column(String(32), nullable=True)
 	date_approved: Mapped[str | None] = mapped_column(String(32), nullable=True)
 	comments: Mapped[str | None] = mapped_column(Text, nullable=True)

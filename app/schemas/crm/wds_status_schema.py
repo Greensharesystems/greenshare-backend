@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class WdsStatusCreateUpdate(BaseModel):
+	wds_no: str | None = None
 	date_submitted: str | None = None
 	date_approved: str | None = None
 	comments: str | None = None
@@ -16,6 +17,7 @@ class WdsStatusResponse(BaseModel):
 	id: int
 	lead_id: int
 	lid: str
+	wds_no: str | None = None
 	date_submitted: str | None = None
 	date_approved: str | None = None
 	status: str
