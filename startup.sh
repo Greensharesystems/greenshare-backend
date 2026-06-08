@@ -21,6 +21,7 @@ run_timed_step() {
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
 
 resolve_python_bin() {
 	if [[ -n "${PYTHON_BIN:-}" ]]; then
