@@ -282,6 +282,74 @@ def test_next_id_advances_after_create(client: tuple[TestClient, Session]) -> No
 	assert response.json() == {"next_lid": "LID-0002"}
 
 
+@pytest.mark.parametrize(
+	("existing_lid", "expected_next"),
+	[
+		("LID-0001", "LID-0002"),
+		("LID-0009", "LID-0010"),
+		("LID-0099", "LID-0100"),
+		("LID-0100", "LID-0101"),
+		("LID-0999", "LID-1000"),
+		("LID-1000", "LID-1001"),
+		("LID-9999", "LID-10000"),
+		("LID-10000", "LID-10001"),
+	],
+)
+def test_next_id_keeps_minimum_four_digit_width(
+	existing_lid: str,
+	expected_next: str,
+	client: tuple[TestClient, Session],
+) -> None:
+	# Lead IDs must be zero-padded to a minimum of 4 digits and grow naturally
+	# beyond that (never forced to 5 digits from the start).
+	test_client, _db = client
+	create_lead(test_client, lid=existing_lid)
+
+	response = test_client.get("/crm/leads/next-id", headers=auth_headers())
+
+	assert response.status_code == 200
+	assert response.json() == {"next_lid": expected_next}
+
+
+def test_stream_lab_status_is_independent_per_stream(client: tuple[TestClient, Session]) -> None:
+	# Lab decisions are stream level: updating SN-001 must never change SN-002.
+	test_client, _db = client
+	response = test_client.post(
+		"/crm/leads",
+		headers=auth_headers(),
+		json={
+			"lid": "LID-0011",
+			"cid": "CID-0001",
+			"customer_name": "Union Steel Processing",
+			"source": "Sales Visit",
+			"assigned_to": "Imran",
+			"streams": [
+				{"waste_stream_name": "Paint Cans", "waste_class": "Hazardous", "est_qty": 50, "unit": "Tons"},
+				{"waste_stream_name": "Oily Paper", "waste_class": "Hazardous", "est_qty": 50, "unit": "Tons"},
+			],
+			"comments": None,
+			"lead_date": "27-05-2026",
+		},
+	)
+	assert response.status_code == 201
+	assert [stream["stream_no"] for stream in response.json()["streams"]] == ["SN-001", "SN-002"]
+
+	update = test_client.put(
+		"/crm/leads/LID-0011/streams/SN-001/lab-status",
+		headers=auth_headers(),
+		json={"decision": "Accept", "decision_other": None, "comments": "Cleared", "chemist_name": "Lab Tech"},
+	)
+	assert update.status_code == 200
+	assert update.json()["stream_no"] == "SN-001"
+	assert update.json()["decision"] == "Accept"
+
+	sn1 = test_client.get("/crm/leads/LID-0011/streams/SN-001/lab-status", headers=auth_headers())
+	sn2 = test_client.get("/crm/leads/LID-0011/streams/SN-002/lab-status", headers=auth_headers())
+
+	assert sn1.json()["decision"] == "Accept"
+	assert sn2.json()["decision"] == ""
+
+
 def test_update_and_get_lab_status(client: tuple[TestClient, Session]) -> None:
 	test_client, _db = client
 	create_lead(test_client)
