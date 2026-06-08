@@ -131,6 +131,7 @@ def serialize_lead(lead: Lead) -> LeadResponse:
 	wds = lead.wds_status
 	wds_date_submitted = wds.date_submitted if wds is not None else None
 	wds_date_approved = wds.date_approved if wds is not None else None
+	wds_no = wds.wds_no if wds is not None else None
 	wds_status_value = _derive_wds_status(wds_date_submitted, wds_date_approved)
 	wds_days = _calculate_wds_days(wds_date_submitted, wds_date_approved)
 
@@ -168,6 +169,7 @@ def serialize_lead(lead: Lead) -> LeadResponse:
 		wds_status=wds_status_value,
 		wds_date_approved=wds_date_approved,
 		wds_status_days=wds_days,
+		wds_no=wds_no,
 	)
 
 

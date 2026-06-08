@@ -333,6 +333,11 @@ def ensure_password_schema() -> None:
             if "deleted_at" not in crm_leads_columns:
                 connection.execute(text("ALTER TABLE crm_leads ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE"))
 
+        if "crm_wds_statuses" in existing_tables:
+            wds_columns = {column["name"] for column in inspect(engine).get_columns("crm_wds_statuses")}
+            if "wds_no" not in wds_columns:
+                connection.execute(text("ALTER TABLE crm_wds_statuses ADD COLUMN wds_no VARCHAR(64)"))
+
         if "reception_notes" in existing_tables:
             rn_columns = {column["name"] for column in inspect(engine).get_columns("reception_notes")}
             if "referring_company" not in rn_columns:
