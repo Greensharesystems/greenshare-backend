@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class ProposalStatusCreateUpdate(BaseModel):
-	pid: str
+	pid: str = ""
 	status: str
 	status_other: str | None = None
 	comments: str | None = None

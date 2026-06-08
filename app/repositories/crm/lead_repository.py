@@ -2,12 +2,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.crm.lead import Lead
+from app.models.crm.lead_stream import LeadStream
 
 
 def get_leads(db: Session) -> list[Lead]:
 	statement = (
 		select(Lead)
 		.options(
+			selectinload(Lead.streams).selectinload(LeadStream.lab_status),
 			selectinload(Lead.lab_status),
 			selectinload(Lead.proposal_status),
 			selectinload(Lead.lead_status),
@@ -23,6 +25,7 @@ def get_lead_by_lid(db: Session, lid: str) -> Lead | None:
 	statement = (
 		select(Lead)
 		.options(
+			selectinload(Lead.streams).selectinload(LeadStream.lab_status),
 			selectinload(Lead.lab_status),
 			selectinload(Lead.proposal_status),
 			selectinload(Lead.lead_status),
