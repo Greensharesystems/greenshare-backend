@@ -32,6 +32,12 @@ class Lead(Base):
 	)
 	deleted_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
 
+	streams: Mapped[list["LeadStream"]] = relationship(
+		"LeadStream",
+		back_populates="lead",
+		cascade="all, delete-orphan",
+		order_by="LeadStream.stream_no",
+	)
 	lab_status: Mapped["LabStatus | None"] = relationship(
 		"LabStatus",
 		back_populates="lead",

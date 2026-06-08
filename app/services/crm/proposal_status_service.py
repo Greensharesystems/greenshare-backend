@@ -41,7 +41,7 @@ def update_proposal_status(db: Session, lid: str, payload: ProposalStatusCreateU
 		status_record = ProposalStatus(
 			lead_id=lead.id,
 			lid=lead.lid,
-			pid=normalize_required_string(payload.pid, "PID"),
+			pid=normalize_optional_string(payload.pid) or "",
 			status=status_value,
 			status_other=status_other,
 			comments=normalize_optional_string(payload.comments),
@@ -51,7 +51,7 @@ def update_proposal_status(db: Session, lid: str, payload: ProposalStatusCreateU
 		status_record = proposal_status_repository.create(db, status_record)
 	else:
 		status_record.lid = lead.lid
-		status_record.pid = normalize_required_string(payload.pid, "PID")
+		status_record.pid = normalize_optional_string(payload.pid) or ""
 		status_record.status = status_value
 		status_record.status_other = status_other
 		status_record.comments = normalize_optional_string(payload.comments)

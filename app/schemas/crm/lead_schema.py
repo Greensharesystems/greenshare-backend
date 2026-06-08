@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
+from app.schemas.crm.lead_stream_schema import LeadStreamCreate, LeadStreamResponse
+
 
 class LeadCreate(BaseModel):
 	lid: str
@@ -11,12 +13,15 @@ class LeadCreate(BaseModel):
 	source_detail: str | None = None
 	assigned_to: str
 	assigned_to_other: str | None = None
-	waste_stream: str
-	waste_class: str
+	# Legacy single-stream fields (optional when streams array is provided)
+	waste_stream: str | None = None
+	waste_class: str | None = None
 	waste_class_other: str | None = None
-	est_qty: float
-	unit: str
+	est_qty: float | None = None
+	unit: str | None = None
 	unit_other: str | None = None
+	# Multi-stream support
+	streams: list[LeadStreamCreate] = []
 	comments: str | None = None
 	lead_date: str
 
@@ -59,6 +64,9 @@ class LeadResponse(BaseModel):
 	lead_date: str
 	created_at: datetime
 	updated_at: datetime
+	# Streams (one per waste stream)
+	streams: list[LeadStreamResponse] = []
+	# Legacy flat status fields (kept for backward compat)
 	lab_id: str | None = None
 	lab_status: str
 	lab_status_days: int

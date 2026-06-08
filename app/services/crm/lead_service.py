@@ -5,8 +5,10 @@ from sqlalchemy.orm import Session
 
 from app.core.date_utils import format_display_date, normalize_date_for_output, normalize_date_for_storage, parse_supported_date
 from app.models.crm.lead import Lead
+from app.models.crm.lead_stream import LeadStream
 from app.repositories.crm import lead_repository
 from app.schemas.crm.lead_schema import LeadCreate, LeadListResponse, LeadResponse, LeadUpdate, NextLeadIdResponse
+from app.schemas.crm.lead_stream_schema import LeadStreamResponse
 
 
 LEAD_ID_PATTERN = re.compile(r"LID-(\d+)")
@@ -43,6 +45,25 @@ def create_lead(db: Session, payload: LeadCreate) -> LeadResponse:
 	if lead_repository.lid_exists(db, lid):
 		raise ValueError("That Lead ID already exists.")
 
+	# Determine effective lead-level waste stream fields from streams or legacy fields
+	if payload.streams:
+		first = payload.streams[0]
+		effective_waste_stream = normalize_required_string(first.waste_stream_name, "Waste Stream Name")
+		effective_waste_class = normalize_required_string(first.waste_class, "Waste Class")
+		effective_waste_class_other = normalize_optional_string(first.waste_class_other)
+		effective_est_qty = normalize_quantity(first.est_qty)
+		effective_unit = normalize_required_string(first.unit, "Unit")
+		effective_unit_other = normalize_optional_string(first.unit_other)
+	elif payload.waste_stream and payload.waste_class and payload.est_qty is not None and payload.unit:
+		effective_waste_stream = normalize_required_string(payload.waste_stream, "Waste Stream")
+		effective_waste_class = normalize_required_string(payload.waste_class, "Waste Class")
+		effective_waste_class_other = normalize_optional_string(payload.waste_class_other)
+		effective_est_qty = normalize_quantity(payload.est_qty)
+		effective_unit = normalize_required_string(payload.unit, "Unit")
+		effective_unit_other = normalize_optional_string(payload.unit_other)
+	else:
+		raise ValueError("Either streams or waste stream details are required.")
+
 	lead = Lead(
 		lid=lid,
 		cid=normalize_required_string(payload.cid, "CID"),
@@ -51,17 +72,51 @@ def create_lead(db: Session, payload: LeadCreate) -> LeadResponse:
 		source_detail=normalize_optional_string(payload.source_detail),
 		assigned_to=normalize_required_string(payload.assigned_to, "Assigned To"),
 		assigned_to_other=normalize_optional_string(payload.assigned_to_other),
-		waste_stream=normalize_required_string(payload.waste_stream, "Waste Stream"),
-		waste_class=normalize_required_string(payload.waste_class, "Waste Class"),
-		waste_class_other=normalize_optional_string(payload.waste_class_other),
-		est_qty=normalize_quantity(payload.est_qty),
-		unit=normalize_required_string(payload.unit, "Unit"),
-		unit_other=normalize_optional_string(payload.unit_other),
+		waste_stream=effective_waste_stream,
+		waste_class=effective_waste_class,
+		waste_class_other=effective_waste_class_other,
+		est_qty=effective_est_qty,
+		unit=effective_unit,
+		unit_other=effective_unit_other,
 		comments=normalize_optional_string(payload.comments),
 		lead_date=normalize_date_for_storage(payload.lead_date, "Lead Date"),
 	)
 
 	created_lead = lead_repository.create_lead(db, lead)
+
+	# Create stream records
+	if payload.streams:
+		for i, stream_data in enumerate(payload.streams):
+			stream_no = f"SN-{i + 1:03d}"
+			stream = LeadStream(
+				lead_id=created_lead.id,
+				lid=created_lead.lid,
+				stream_no=stream_no,
+				waste_stream_name=normalize_required_string(stream_data.waste_stream_name, "Waste Stream Name"),
+				est_qty=normalize_quantity(stream_data.est_qty),
+				unit=normalize_required_string(stream_data.unit, "Unit"),
+				unit_other=normalize_optional_string(stream_data.unit_other),
+				waste_class=normalize_required_string(stream_data.waste_class, "Waste Class"),
+				waste_class_other=normalize_optional_string(stream_data.waste_class_other),
+			)
+			db.add(stream)
+	else:
+		# Create SN-001 from legacy lead fields
+		stream = LeadStream(
+			lead_id=created_lead.id,
+			lid=created_lead.lid,
+			stream_no="SN-001",
+			waste_stream_name=effective_waste_stream,
+			est_qty=effective_est_qty,
+			unit=effective_unit,
+			unit_other=effective_unit_other,
+			waste_class=effective_waste_class,
+			waste_class_other=effective_waste_class_other,
+		)
+		db.add(stream)
+
+	db.commit()
+	db.refresh(created_lead)
 	return serialize_lead(created_lead)
 
 
@@ -119,6 +174,36 @@ def generate_next_lead_id(db: Session) -> str:
 	return f"LID-{max_number + 1:04d}"
 
 
+def _serialize_streams(lead: Lead) -> list[LeadStreamResponse]:
+	result: list[LeadStreamResponse] = []
+	for stream in (lead.streams or []):
+		lab = stream.lab_status
+		lab_decision = lab.decision if lab is not None and lab.decision else "Pending"
+		lab_days = calculate_elapsed_days(
+			lead.lead_date,
+			lab.decision_date.date() if lab is not None and lab.decision_date is not None else None,
+		)
+		result.append(
+			LeadStreamResponse(
+				id=stream.id,
+				lid=stream.lid,
+				stream_no=stream.stream_no,
+				waste_stream_name=stream.waste_stream_name,
+				est_qty=stream.est_qty,
+				unit=stream.unit,
+				unit_other=stream.unit_other,
+				waste_class=stream.waste_class,
+				waste_class_other=stream.waste_class_other,
+				lab_decision=lab_decision,
+				lab_decision_other=lab.decision_other if lab is not None else None,
+				lab_comments=lab.comments if lab is not None else None,
+				lab_chemist_name=lab.chemist_name if lab is not None else "",
+				lab_status_days=lab_days,
+			)
+		)
+	return result
+
+
 def serialize_lead(lead: Lead) -> LeadResponse:
 	lab_status_value = summarize_lab_status(lead.lab_status.decision if lead.lab_status is not None else None)
 	proposal_status_value = summarize_proposal_status(lead.proposal_status.status if lead.proposal_status is not None else None)
@@ -154,6 +239,7 @@ def serialize_lead(lead: Lead) -> LeadResponse:
 		lead_date=default_date,
 		created_at=lead.created_at,
 		updated_at=lead.updated_at,
+		streams=_serialize_streams(lead),
 		lab_id=lead.lab_status.lab_id if lead.lab_status is not None else None,
 		lab_status=lab_status_value,
 		lab_status_days=lab_status_days,

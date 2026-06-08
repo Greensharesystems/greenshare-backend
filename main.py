@@ -17,6 +17,7 @@ from app.api.auth import router as auth_router
 from app.api.crm.lab_status import router as crm_lab_status_router
 from app.api.crm.leads import router as crm_leads_router
 from app.api.crm.lead_status import router as crm_lead_status_router
+from app.api.crm.lead_streams import router as crm_lead_streams_router
 from app.api.crm.proposal_status import router as crm_proposal_status_router
 from app.api.crm.wds_status import router as crm_wds_status_router
 from app.api.customers import router as customers_router
@@ -30,8 +31,10 @@ from app.core.logging_config import configure_logging
 from app.db.database import Base, SessionLocal, engine
 from app.models.customer import Customer
 from app.models.crm.lab_status import LabStatus
+from app.models.crm.lab_stream_status import LabStreamStatus
 from app.models.crm.lead import Lead
 from app.models.crm.lead_status import LeadStatus
+from app.models.crm.lead_stream import LeadStream
 from app.models.crm.proposal_status import ProposalStatus
 from app.models.crm.wds_status import WdsStatus
 from app.models.circularity_certificate import CircularityCertificate
@@ -72,6 +75,7 @@ app.include_router(crm_lab_status_router)
 app.include_router(crm_proposal_status_router)
 app.include_router(crm_lead_status_router)
 app.include_router(crm_wds_status_router)
+app.include_router(crm_lead_streams_router)
 app.include_router(reception_notes_router)
 app.include_router(reception_certificates_router)
 app.include_router(circularity_certificates_router)
@@ -164,6 +168,7 @@ def startup_database() -> None:
     try:
         Base.metadata.create_all(bind=engine, checkfirst=True)
         ensure_password_schema()
+        ensure_crm_streams_schema()
         seed_admin_user()
     except Exception as exc:
         logger.exception(
@@ -235,6 +240,65 @@ def seed_admin_user() -> None:
 
 def format_last_active(value: datetime) -> str:
     return value.strftime("Today, %H:%M")
+
+
+def ensure_crm_streams_schema() -> None:
+    """
+    Idempotent startup migration for the Lead Streams feature.
+
+    1. For every existing lead that has no stream record yet, insert an SN-001
+       stream using the lead's own waste-stream fields.
+    2. For SN-001 streams that have no lab stream status yet, copy the existing
+       lead-level lab status (crm_lab_statuses) across so legacy decisions are
+       preserved.
+    """
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+
+    # Guard: tables may not exist yet on a brand-new install (create_all ran first,
+    # but run this defensively).
+    if "crm_lead_streams" not in existing_tables or "crm_lab_stream_statuses" not in existing_tables:
+        return
+
+    with engine.begin() as connection:
+        # 1. Backfill SN-001 stream for every lead that doesn't have one.
+        connection.execute(text("""
+            INSERT INTO crm_lead_streams
+                (lead_id, lid, stream_no, waste_stream_name, est_qty, unit, unit_other,
+                 waste_class, waste_class_other, created_at, updated_at)
+            SELECT
+                l.id, l.lid, 'SN-001',
+                l.waste_stream, l.est_qty, l.unit, l.unit_other,
+                l.waste_class, l.waste_class_other,
+                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            FROM crm_leads l
+            WHERE l.deleted_at IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM crm_lead_streams ls WHERE ls.lead_id = l.id
+              )
+        """))
+
+        # 2. Migrate existing lead-level lab statuses to stream-level for SN-001.
+        connection.execute(text("""
+            INSERT INTO crm_lab_stream_statuses
+                (lead_stream_id, lead_id, lid, stream_no,
+                 decision, decision_other, comments, chemist_name, decision_date,
+                 created_at, updated_at)
+            SELECT
+                ls.id, ls.lead_id, ls.lid, ls.stream_no,
+                lab.decision, lab.decision_other, lab.comments,
+                lab.chemist_name, lab.decision_date,
+                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            FROM crm_lead_streams ls
+            JOIN crm_lab_statuses lab ON lab.lead_id = ls.lead_id
+            WHERE ls.stream_no = 'SN-001'
+              AND lab.decision IS NOT NULL
+              AND lab.decision != ''
+              AND NOT EXISTS (
+                  SELECT 1 FROM crm_lab_stream_statuses lss
+                  WHERE lss.lead_stream_id = ls.id
+              )
+        """))
 
 
 def ensure_password_schema() -> None:

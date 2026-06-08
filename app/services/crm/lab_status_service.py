@@ -41,7 +41,7 @@ def update_lab_status(db: Session, lid: str, payload: LabStatusCreateUpdate) -> 
 		status_record = LabStatus(
 			lead_id=lead.id,
 			lid=lead.lid,
-			lab_id=normalize_required_string(payload.lab_id, "LAB ID"),
+			lab_id=normalize_optional_string(payload.lab_id) or "",
 			decision=decision,
 			decision_other=decision_other,
 			comments=normalize_optional_string(payload.comments),
@@ -51,7 +51,7 @@ def update_lab_status(db: Session, lid: str, payload: LabStatusCreateUpdate) -> 
 		status_record = lab_status_repository.create(db, status_record)
 	else:
 		status_record.lid = lead.lid
-		status_record.lab_id = normalize_required_string(payload.lab_id, "LAB ID")
+		status_record.lab_id = normalize_optional_string(payload.lab_id) or ""
 		status_record.decision = decision
 		status_record.decision_other = decision_other
 		status_record.comments = normalize_optional_string(payload.comments)

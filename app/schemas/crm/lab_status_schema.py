@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class LabStatusCreateUpdate(BaseModel):
-	lab_id: str
+	lab_id: str = ""
 	decision: str
 	decision_other: str | None = None
 	comments: str | None = None
