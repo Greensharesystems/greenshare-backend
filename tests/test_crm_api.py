@@ -84,6 +84,38 @@ def auth_headers() -> dict[str, str]:
 	return {"Authorization": f"Bearer {create_access_token(principal)}"}
 
 
+def employee_auth_headers(db: Session) -> dict[str, str]:
+	employee_id = "UID-CRM-EMP1"
+	employee_email = "crm-employee@example.com"
+	db.add(
+		User(
+			user_id_date="20260527",
+			user_id=employee_id,
+			first_name="CRM",
+			last_name="Employee",
+			email=employee_email,
+			position="Employee",
+			department="CRM",
+			mobile_phone="0000000000",
+			company="Zero Waste",
+			role="Employee",
+			customer_id=None,
+			password_hash=hash_password(TEST_ADMIN_PASSWORD),
+			last_active="Today, 09:00",
+		),
+	)
+	db.commit()
+	principal = AuthPrincipal(
+		email=employee_email,
+		displayName="CRM Employee",
+		identifier=employee_id,
+		accountType="user",
+		role="employee",
+		customerId=None,
+	)
+	return {"Authorization": f"Bearer {create_access_token(principal)}"}
+
+
 def create_lead(client: TestClient, lid: str = "LID-0001", lead_date: str = "27-05-2026") -> dict[str, object]:
 	response = client.post(
 		"/crm/leads",
@@ -348,6 +380,114 @@ def test_stream_lab_status_is_independent_per_stream(client: tuple[TestClient, S
 
 	assert sn1.json()["decision"] == "Accept"
 	assert sn2.json()["decision"] == ""
+
+
+def test_stream_codes_generate_by_category_and_soft_delete(client: tuple[TestClient, Session]) -> None:
+	test_client, _db = client
+
+	first_hs = test_client.get("/crm/stream-codes/next-code?category=Hazardous%20Stream", headers=auth_headers())
+	assert first_hs.status_code == 200
+	assert first_hs.json() == {"next_stream_code": "HS-1"}
+
+	hs_create = test_client.post(
+		"/crm/stream-codes",
+		headers=auth_headers(),
+		json={
+			"stream_code": "HS-1",
+			"category": "Hazardous Stream",
+			"stream_name": "Paint Cans",
+			"description": "Hazardous paint container waste",
+			"status": "Active",
+		},
+	)
+	assert hs_create.status_code == 201
+	assert hs_create.json()["stream_code"] == "HS-1"
+	assert hs_create.json()["category"] == "Hazardous Stream"
+
+	next_hs = test_client.get("/crm/stream-codes/next-code?category=Hazardous%20Stream", headers=auth_headers())
+	assert next_hs.status_code == 200
+	assert next_hs.json() == {"next_stream_code": "HS-2"}
+
+	nhs_create = test_client.post(
+		"/crm/stream-codes",
+		headers=auth_headers(),
+		json={
+			"stream_code": "NHS-1",
+			"category": "Non-Hazardous Stream",
+			"stream_name": "OCC",
+			"description": None,
+			"status": "Active",
+		},
+	)
+	assert nhs_create.status_code == 201
+	next_nhs = test_client.get("/crm/stream-codes/next-code?category=Non-Hazardous%20Stream", headers=auth_headers())
+	assert next_nhs.status_code == 200
+	assert next_nhs.json() == {"next_stream_code": "NHS-2"}
+
+	rs_create = test_client.post(
+		"/crm/stream-codes",
+		headers=auth_headers(),
+		json={
+			"stream_code": "RS-1",
+			"category": "Recyclable Stream",
+			"stream_name": "Scrap Metal",
+			"description": "Reusable metal stream",
+			"status": "Active",
+		},
+	)
+	assert rs_create.status_code == 201
+	next_rs = test_client.get("/crm/stream-codes/next-code?category=Recyclable%20Stream", headers=auth_headers())
+	assert next_rs.status_code == 200
+	assert next_rs.json() == {"next_stream_code": "RS-2"}
+
+	by_code = test_client.get("/crm/stream-codes/HS-1", headers=auth_headers())
+	by_id = test_client.get(f"/crm/stream-codes/{hs_create.json()['id']}", headers=auth_headers())
+	assert by_code.status_code == 200
+	assert by_id.status_code == 200
+	assert by_code.json()["id"] == by_id.json()["id"]
+
+	update = test_client.put(
+		"/crm/stream-codes/HS-1",
+		headers=auth_headers(),
+		json={"stream_name": "Paint Solids", "description": "Updated", "status": "Inactive"},
+	)
+	assert update.status_code == 200
+	assert update.json()["stream_name"] == "Paint Solids"
+	assert update.json()["status"] == "Inactive"
+
+	delete = test_client.delete("/crm/stream-codes/HS-1", headers=auth_headers())
+	assert delete.status_code == 204
+
+	list_response = test_client.get("/crm/stream-codes", headers=auth_headers())
+	assert list_response.status_code == 200
+	assert {row["stream_code"] for row in list_response.json()} == {"NHS-1", "RS-1"}
+
+	get_deleted = test_client.get("/crm/stream-codes/HS-1", headers=auth_headers())
+	assert get_deleted.status_code == 404
+
+	next_hs_after_delete = test_client.get("/crm/stream-codes/next-code?category=Hazardous%20Stream", headers=auth_headers())
+	assert next_hs_after_delete.status_code == 200
+	assert next_hs_after_delete.json() == {"next_stream_code": "HS-2"}
+
+
+def test_stream_code_management_is_admin_only(client: tuple[TestClient, Session]) -> None:
+	test_client, db = client
+	employee_headers = employee_auth_headers(db)
+
+	response = test_client.get("/crm/stream-codes", headers=employee_headers)
+	assert response.status_code == 403
+
+	create_response = test_client.post(
+		"/crm/stream-codes",
+		headers=employee_headers,
+		json={
+			"stream_code": "HS-1",
+			"category": "Hazardous Stream",
+			"stream_name": "Paint Cans",
+			"status": "Active",
+		},
+	)
+	assert create_response.status_code == 403
 
 
 def test_update_and_get_lab_status(client: tuple[TestClient, Session]) -> None:
