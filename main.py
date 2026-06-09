@@ -19,6 +19,7 @@ from app.api.crm.leads import router as crm_leads_router
 from app.api.crm.lead_status import router as crm_lead_status_router
 from app.api.crm.lead_streams import router as crm_lead_streams_router
 from app.api.crm.proposal_status import router as crm_proposal_status_router
+from app.api.crm.stream_codes import router as crm_stream_codes_router
 from app.api.crm.wds_status import router as crm_wds_status_router
 from app.api.customers import router as customers_router
 from app.api.circularity_certificates import router as circularity_certificates_router
@@ -36,6 +37,7 @@ from app.models.crm.lead import Lead
 from app.models.crm.lead_status import LeadStatus
 from app.models.crm.lead_stream import LeadStream
 from app.models.crm.proposal_status import ProposalStatus
+from app.models.crm.stream_code import StreamCode
 from app.models.crm.wds_status import WdsStatus
 from app.models.circularity_certificate import CircularityCertificate
 from app.models.reception_certificate import ReceptionCertificate
@@ -76,6 +78,7 @@ app.include_router(crm_proposal_status_router)
 app.include_router(crm_lead_status_router)
 app.include_router(crm_wds_status_router)
 app.include_router(crm_lead_streams_router)
+app.include_router(crm_stream_codes_router)
 app.include_router(reception_notes_router)
 app.include_router(reception_certificates_router)
 app.include_router(circularity_certificates_router)
