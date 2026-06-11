@@ -29,7 +29,7 @@
 				</div>
 
 				<div class="document-header__title-row">
-					<h1 class="document-header__title">RECEPTION NOTE</h1>
+					<h1 class="document-header__title">{{ rnid }}</h1>
 				</div>
 			</header>
 
@@ -55,7 +55,7 @@
 				<div class="field-item" aria-hidden="true"></div>
 				<div class="field-item">
 					<span class="field-item__label">Total Quantity</span>
-					<span class="field-item__value">{{ total_quantity }}</span>
+					<span class="field-item__value">{{ [total_quantity, waste_stream_quantity_unit] | select | join(' ') }}</span>
 				</div>
 			</div>
 			</section>

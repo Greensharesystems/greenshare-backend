@@ -915,8 +915,10 @@ def test_render_reception_note_template_supports_total_quantity() -> None:
 	service = PdfGenerationService()
 	rendered_html = service.render_template("pdf/reception_note.html", build_reception_note_pdf_context())
 
+	assert '<h1 class="document-header__title">RNID-0001-0001</h1>' in rendered_html
+	assert '<h1 class="document-header__title">RECEPTION NOTE</h1>' not in rendered_html
 	assert "Total Quantity" in rendered_html
-	assert "1200" in rendered_html
+	assert "1200 kg" in rendered_html
 
 
 def test_render_reception_certificate_template_supports_multi_linked_entries() -> None:
