@@ -3,7 +3,7 @@ from datetime import datetime
 import pytest
 from fastapi import HTTPException
 
-from app.api.reception_notes import download_reception_note_pdf, view_reception_note_pdf
+from app.api.reception_notes import download_reception_note_pdf, get_reception_note, view_reception_note_pdf
 from app.core.auth import AuthPrincipal
 from app.models.circularity_certificate import CircularityCertificate
 from app.models.customer import Customer
@@ -62,7 +62,75 @@ def test_build_reception_note_pdf_context_uses_primary_waste_stream() -> None:
 	assert context["waste_stream_code"] == "WS-001"
 	assert context["waste_stream_name"] == "Mixed Plastic"
 	assert context["waste_stream_reception_date"] == "13-04-2026"
+	assert context["total_quantity"] == "1200"
+	assert context["waste_stream_quantity_unit"] == "kg"
 	assert context["issued_by"] == "Greenshare Operations"
+
+
+def test_build_reception_note_pdf_context_handles_missing_pdf_fields() -> None:
+	reception_note = ReceptionNote(
+		id=8,
+		rnid_date="2026-04-13",
+		rnid="",
+		customer_id="CID-0001",
+		producing_company_name="Acme Recycling LLC",
+		waste_streams=[{"quantity": "", "quantityUnit": "Tons"}],
+		waste_stream_quantity="",
+		rn_issued_by="Greenshare Operations",
+		created_at=datetime.now(),
+	)
+
+	context = reception_note_service.build_reception_note_pdf_context(reception_note)
+
+	assert context["rnid"] == "N/A"
+	assert context["total_quantity"] == "N/A"
+	assert context["waste_stream_quantity_unit"] == ""
+
+
+def test_reception_note_edit_is_blocked_after_reception_certificate_is_issued(monkeypatch) -> None:
+	reception_note = ReceptionNote(
+		id=9,
+		rnid="RNID-0001-0001",
+		customer_id="CID-0001",
+	)
+	issued_certificate = ReceptionCertificate(
+		rcid="RCID-0001-0001",
+		rnid="RNID-0001-0001",
+		linked_rnids=["RNID-0001-0001"],
+		customer_id="CID-0001",
+		status="Issued",
+	)
+
+	monkeypatch.setattr(
+		reception_note_service.reception_certificate_repository,
+		"get_reception_certificates",
+		lambda db: [issued_certificate],
+	)
+
+	assert reception_note_service.can_edit_reception_note(db=None, reception_note=reception_note) is False
+
+
+def test_reception_note_edit_is_allowed_when_reception_certificate_is_pending(monkeypatch) -> None:
+	reception_note = ReceptionNote(
+		id=10,
+		rnid="RNID-0001-0001",
+		customer_id="CID-0001",
+	)
+	pending_certificate = ReceptionCertificate(
+		rcid="RCID-0001-0001",
+		rnid="RNID-0001-0001",
+		linked_rnids=["RNID-0001-0001"],
+		customer_id="CID-0001",
+		status="Pending",
+	)
+
+	monkeypatch.setattr(
+		reception_note_service.reception_certificate_repository,
+		"get_reception_certificates",
+		lambda db: [pending_certificate],
+	)
+
+	assert reception_note_service.can_edit_reception_note(db=None, reception_note=reception_note) is True
 
 
 def test_view_reception_note_pdf_returns_inline_headers(monkeypatch) -> None:
@@ -88,6 +156,28 @@ def test_view_reception_note_pdf_returns_inline_headers(monkeypatch) -> None:
 	assert response.media_type == "application/pdf"
 	assert response.headers["content-disposition"] == 'inline; filename="RNID-0001-0001.pdf"'
 	assert response.body == b"%PDF-test"
+
+
+def test_get_reception_note_returns_payload(monkeypatch) -> None:
+	principal = AuthPrincipal(
+		email="employee@example.com",
+		displayName="Employee User",
+		identifier="EMP-001",
+		accountType="user",
+		role="employee",
+		customerId=None,
+	)
+	expected = object()
+
+	def fake_get_reception_note(db, rnid: str, current_principal: AuthPrincipal):
+		assert db is None
+		assert rnid == "RNID-0001-0001"
+		assert current_principal == principal
+		return expected
+
+	monkeypatch.setattr(reception_note_service, "get_reception_note", fake_get_reception_note)
+
+	assert get_reception_note("RNID-0001-0001", db=None, current_user=principal) is expected
 
 
 def test_download_reception_note_pdf_returns_attachment_headers(monkeypatch) -> None:

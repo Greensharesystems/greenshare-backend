@@ -63,6 +63,18 @@ def download_reception_note_pdf(
 	return build_reception_note_pdf_response(reception_note_id, "attachment", db, current_user)
 
 
+@router.get("/{rnid}", response_model=ReceptionNoteResponse)
+def get_reception_note(
+	rnid: str,
+	db: Session = Depends(get_db),
+	current_user: AuthPrincipal = Depends(get_current_principal),
+) -> ReceptionNoteResponse:
+	try:
+		return reception_note_service.get_reception_note(db, rnid, current_user)
+	except ValueError as exc:
+		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
 def build_reception_note_pdf_response(
 	reception_note_id: str,
 	content_disposition: str,

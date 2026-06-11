@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import AuthPrincipal, can_access_customer_data, get_customer_scope_id, has_shared_platform_access
 from app.core.date_utils import normalize_date_for_output, normalize_date_for_storage, normalize_optional_date_for_storage
 from app.models.reception_note import ReceptionNote
-from app.repositories import reception_note_repository
+from app.repositories import reception_certificate_repository, reception_note_repository
 from app.schemas.reception_note import NextReceptionNoteIdResponse, ReceptionNoteCreate, ReceptionNoteResponse, ReceptionNoteUpdate
 from app.services.pdf_generation_service import generate_pdf
 
@@ -101,6 +101,9 @@ def update_reception_note(db: Session, rnid: str, payload: ReceptionNoteUpdate, 
 	if reception_note is None or not can_access_reception_note(reception_note, principal):
 		raise ValueError("That reception note could not be found.")
 
+	if not can_edit_reception_note(db, reception_note):
+		raise ValueError("Reception Note cannot be edited after Reception Certificate is issued.")
+
 	if payload.rnidDate is not None:
 		reception_note.rnid_date = normalize_date_for_storage(payload.rnidDate, "Reception Note ID Date")
 	if payload.weighBridgeSlipDate is not None:
@@ -173,7 +176,7 @@ def generate_reception_note_pdf(db: Session, reception_note_reference: int | str
 		raise ValueError("That reception note could not be found.")
 
 	context = build_reception_note_pdf_context(reception_note)
-	normalized_rnid = normalize_rnid(reception_note.rnid)
+	normalized_rnid = get_reception_note_pdf_document_id(reception_note)
 	pdf_bytes = generate_pdf(
 		"pdf/reception_note.html",
 		context,
@@ -185,6 +188,16 @@ def generate_reception_note_pdf(db: Session, reception_note_reference: int | str
 	return filename, pdf_bytes
 
 
+def get_reception_note(db: Session, rnid: str, principal: AuthPrincipal) -> ReceptionNoteResponse:
+	normalized_rnid = normalize_rnid(rnid)
+	reception_note = reception_note_repository.get_reception_note_by_rnid(db, normalized_rnid)
+
+	if reception_note is None or not can_access_reception_note(reception_note, principal):
+		raise ValueError("That reception note could not be found.")
+
+	return serialize_reception_note(reception_note)
+
+
 def get_visible_reception_notes(db: Session, principal: AuthPrincipal) -> list[ReceptionNote]:
 	if has_shared_platform_access(principal):
 		return reception_note_repository.get_reception_notes(db)
@@ -194,6 +207,22 @@ def get_visible_reception_notes(db: Session, principal: AuthPrincipal) -> list[R
 
 def can_access_reception_note(reception_note: ReceptionNote, principal: AuthPrincipal) -> bool:
 	return can_access_customer_data(principal, reception_note.customer_id)
+
+
+def can_edit_reception_note(db: Session, reception_note: ReceptionNote) -> bool:
+	try:
+		normalized_reception_note_rnid = normalize_rnid(reception_note.rnid)
+	except ValueError:
+		return True
+
+	for reception_certificate in reception_certificate_repository.get_reception_certificates(db):
+		if normalized_reception_note_rnid not in normalize_reception_certificate_linked_rnids(reception_certificate):
+			continue
+
+		if str(getattr(reception_certificate, "status", "")).strip().lower() == "issued":
+			return False
+
+	return True
 
 
 def generate_next_reception_note_id(db: Session, customer_id: str) -> str:
@@ -307,13 +336,14 @@ def normalize_waste_stream(waste_stream: dict[str, str]) -> dict[str, str]:
 def build_reception_note_pdf_context(reception_note: ReceptionNote) -> dict[str, str]:
 	primary_waste_stream = get_primary_waste_stream(reception_note)
 	fallback_quantity, fallback_quantity_unit = split_quantity_and_unit(reception_note.waste_stream_quantity)
-	total_quantity = calculate_reception_note_total_quantity(reception_note)
+	total_quantity = get_reception_note_total_quantity_for_pdf(reception_note)
+	total_quantity_unit = "" if total_quantity == "N/A" else primary_waste_stream["quantityUnit"] or fallback_quantity_unit
 
 	return {
 		"rnid_date": normalize_date_for_output(reception_note.rnid_date),
-		"rnid": normalize_rnid(reception_note.rnid),
+		"rnid": format_reception_note_pdf_rnid(reception_note.rnid),
 		"customer_id": reception_note.customer_id,
-		"total_quantity": total_quantity or fallback_quantity,
+		"total_quantity": total_quantity,
 		"customer_name": reception_note.producing_company_name,
 		"producing_company_emirate": reception_note.producing_company_emirate,
 		"producing_company_office_address": reception_note.producing_company_office_address,
@@ -332,7 +362,7 @@ def build_reception_note_pdf_context(reception_note: ReceptionNote) -> dict[str,
 		"waste_stream_class": primary_waste_stream["wasteClass"],
 		"waste_stream_physical_state": primary_waste_stream["physicalState"],
 		"waste_stream_quantity": primary_waste_stream["quantity"] or fallback_quantity,
-		"waste_stream_quantity_unit": primary_waste_stream["quantityUnit"] or fallback_quantity_unit,
+		"waste_stream_quantity_unit": total_quantity_unit,
 		"waste_stream_collection_emirate": primary_waste_stream["collectionEmirate"],
 		"waste_stream_collection_location": primary_waste_stream["collectionLocation"],
 		"waste_stream_reception_date": normalize_date_for_output(primary_waste_stream["receptionDate"]),
@@ -362,9 +392,52 @@ def calculate_reception_note_total_quantity(reception_note: ReceptionNote) -> st
 	return sum_quantity_values([split_quantity_and_unit(reception_note.waste_stream_quantity)[0]])
 
 
+def get_reception_note_total_quantity_for_pdf(reception_note: ReceptionNote) -> str:
+	waste_streams = reception_note.waste_streams or []
+	quantity_values = [normalize_waste_stream(waste_stream)["quantity"] for waste_stream in waste_streams]
+
+	if not quantity_values:
+		quantity_values = [split_quantity_and_unit(reception_note.waste_stream_quantity)[0]]
+
+	if not any(parse_decimal_quantity(quantity_value) is not None for quantity_value in quantity_values):
+		return "N/A"
+
+	return calculate_reception_note_total_quantity(reception_note)
+
+
+def get_reception_note_pdf_document_id(reception_note: ReceptionNote) -> str:
+	try:
+		return normalize_rnid(reception_note.rnid)
+	except ValueError:
+		fallback_id = str(getattr(reception_note, "id", "") or "").strip()
+		return f"reception-note-{fallback_id or 'unknown'}"
+
+
+def format_reception_note_pdf_rnid(rnid: str) -> str:
+	try:
+		return normalize_rnid(rnid)
+	except ValueError:
+		return str(rnid or "").strip().upper() or "N/A"
+
+
+def normalize_reception_certificate_linked_rnids(reception_certificate) -> list[str]:
+	linked_rnids = list(getattr(reception_certificate, "linked_rnids", None) or [])
+	if not linked_rnids:
+		linked_rnids = str(getattr(reception_certificate, "rnid", "") or "").split(",")
+
+	normalized_rnids: list[str] = []
+	for rnid in linked_rnids:
+		try:
+			normalized_rnids.append(normalize_rnid(str(rnid).strip()))
+		except ValueError:
+			continue
+
+	return normalized_rnids
+
+
 def split_quantity_and_unit(quantity_value: str, quantity_unit: str = "") -> tuple[str, str]:
-	trimmed_quantity = quantity_value.strip()
-	trimmed_unit = quantity_unit.strip()
+	trimmed_quantity = str(quantity_value or "").strip()
+	trimmed_unit = str(quantity_unit or "").strip()
 
 	if not trimmed_quantity:
 		return "", trimmed_unit
