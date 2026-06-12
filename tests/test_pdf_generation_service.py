@@ -1006,10 +1006,16 @@ def test_render_reception_note_template_supports_total_quantity() -> None:
 
 def test_render_reception_certificate_template_supports_multi_linked_entries() -> None:
 	service = PdfGenerationService()
-	rendered_html = service.render_template("pdf/reception_certificate.html", build_reception_certificate_multi_pdf_context())
+	context = build_reception_certificate_multi_pdf_context()
+	context["document_title"] = context["rcid"]
+	rendered_html = service.render_template("pdf/reception_certificate.html", context)
 
+	assert "<title>RCID-0001-0001</title>" in rendered_html
+	assert '<h1 class="document-header__title">RECEPTION CERTIFICATE</h1>' in rendered_html
+	assert '<h1 class="document-header__title">RCID-0001-0001</h1>' not in rendered_html
 	assert "Linked Reception Notes" in rendered_html
 	assert "Total Quantity" in rendered_html
+	assert "1225" in rendered_html
 	assert "Linked Reception Note 1" in rendered_html
 	assert "Linked Reception Note 2" in rendered_html
 	assert "RNID-0001-0002" in rendered_html
