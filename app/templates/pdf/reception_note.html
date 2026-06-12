@@ -3,7 +3,7 @@
 <head>
 	<meta charset="UTF-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-	<title>RECEPTION NOTE</title>
+	<title>{{ document_title | default("RECEPTION NOTE") }}</title>
 	<style>{{ embedded_css | safe }}</style>
 </head>
 <body>
@@ -29,7 +29,7 @@
 				</div>
 
 				<div class="document-header__title-row">
-					<h1 class="document-header__title">{{ rnid }}</h1>
+					<h1 class="document-header__title">RECEPTION NOTE</h1>
 				</div>
 			</header>
 
