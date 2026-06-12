@@ -395,6 +395,15 @@ def ensure_password_schema() -> None:
                 connection.execute(text("ALTER TABLE circularity_certificates ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE"))
             if "deleted_by" not in circularity_columns:
                 connection.execute(text("ALTER TABLE circularity_certificates ADD COLUMN deleted_by VARCHAR(255)"))
+            if "pdf_file_path" not in circularity_columns:
+                connection.execute(text("ALTER TABLE circularity_certificates ADD COLUMN pdf_file_path VARCHAR(512)"))
+            if "pdf_cache_fingerprint" not in circularity_columns:
+                connection.execute(text("ALTER TABLE circularity_certificates ADD COLUMN pdf_cache_fingerprint VARCHAR(128)"))
+            if "pdf_generated_at" not in circularity_columns:
+                connection.execute(text("ALTER TABLE circularity_certificates ADD COLUMN pdf_generated_at TIMESTAMP WITH TIME ZONE"))
+
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_circularity_certificates_customer_deleted_created ON circularity_certificates (cid, is_deleted, created_at)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_circularity_certificates_owner_deleted_created ON circularity_certificates (owner_identifier, is_deleted, created_at)"))
 
         if "crm_leads" in existing_tables:
             crm_leads_columns = {column["name"] for column in inspect(engine).get_columns("crm_leads")}
@@ -449,6 +458,15 @@ def ensure_password_schema() -> None:
                 connection.execute(text("ALTER TABLE reception_certificates ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE"))
             if "deleted_by" not in rc_columns:
                 connection.execute(text("ALTER TABLE reception_certificates ADD COLUMN deleted_by VARCHAR(255)"))
+            if "pdf_file_path" not in rc_columns:
+                connection.execute(text("ALTER TABLE reception_certificates ADD COLUMN pdf_file_path VARCHAR(512)"))
+            if "pdf_cache_fingerprint" not in rc_columns:
+                connection.execute(text("ALTER TABLE reception_certificates ADD COLUMN pdf_cache_fingerprint VARCHAR(128)"))
+            if "pdf_generated_at" not in rc_columns:
+                connection.execute(text("ALTER TABLE reception_certificates ADD COLUMN pdf_generated_at TIMESTAMP WITH TIME ZONE"))
+
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_reception_certificates_customer_deleted_created ON reception_certificates (customer_id, is_deleted, created_at)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_reception_certificates_owner_deleted_created ON reception_certificates (owner_identifier, is_deleted, created_at)"))
 
     with SessionLocal() as db:
         should_commit = False

@@ -1,4 +1,5 @@
 import logging
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
@@ -74,6 +75,7 @@ def build_reception_certificate_pdf_response(
 	db: Session,
 	current_user: AuthPrincipal,
 ) -> Response:
+	started_at = time.perf_counter()
 	logger.info(
 		"Reception certificate PDF route hit: reference=%s disposition=%s user=%s",
 		reception_certificate_reference,
@@ -81,7 +83,11 @@ def build_reception_certificate_pdf_response(
 		current_user.identifier,
 	)
 	try:
-		filename, pdf_bytes = reception_certificate_service.generate_reception_certificate_pdf(db, reception_certificate_reference, current_user)
+		filename, pdf_bytes, cache_hit = reception_certificate_service.generate_reception_certificate_pdf_with_cache_status(
+			db,
+			reception_certificate_reference,
+			current_user,
+		)
 	except ValueError as exc:
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 	except RuntimeError as exc:
@@ -96,16 +102,26 @@ def build_reception_certificate_pdf_response(
 		) from exc
 
 	logger.info(
-		"Reception certificate PDF generated successfully: reference=%s filename=%s bytes=%d disposition=%s",
-		reception_certificate_reference,
-		filename,
-		len(pdf_bytes),
-		content_disposition,
+		"reception_certificate_pdf_served",
+		extra={
+			"certificate_id": str(reception_certificate_reference),
+			"pdf_filename": filename,
+			"size_bytes": len(pdf_bytes),
+			"disposition": content_disposition,
+			"cache_hit": cache_hit,
+			"pdf_regenerated": not cache_hit,
+			"view_time_seconds": round(time.perf_counter() - started_at, 4) if content_disposition == "inline" else None,
+			"download_time_seconds": round(time.perf_counter() - started_at, 4) if content_disposition == "attachment" else None,
+		},
 	)
 	return Response(
 		content=pdf_bytes,
 		media_type="application/pdf",
-		headers={"Content-Disposition": f'{content_disposition}; filename="{filename}"'},
+		headers={
+			"Content-Disposition": f'{content_disposition}; filename="{filename}"',
+			"X-Certificate-PDF-Cache": "HIT" if cache_hit else "MISS",
+			"X-Certificate-PDF-Regenerated": "No" if cache_hit else "Yes",
+		},
 	)
 
 

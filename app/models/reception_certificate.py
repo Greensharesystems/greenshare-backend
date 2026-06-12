@@ -30,4 +30,7 @@ class ReceptionCertificate(Base):
 	is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 	deleted_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 	deleted_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+	pdf_file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+	pdf_cache_fingerprint: Mapped[str | None] = mapped_column(String(128), nullable=True)
+	pdf_generated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 	created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

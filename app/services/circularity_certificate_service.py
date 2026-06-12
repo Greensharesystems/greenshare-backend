@@ -1,6 +1,8 @@
 import hashlib
 import json
+import logging
 import re
+import time
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy.orm import Session
@@ -15,6 +17,7 @@ from app.schemas.circularity_certificate import (
 	NextCircularityCertificateIdResponse,
 )
 from app.services.pdf_generation_service import generate_pdf
+from app.services.certificate_pdf_cache_service import build_pdf_content_fingerprint, get_or_create_certificate_pdf
 
 
 RECEPTION_CERTIFICATE_ID_PATTERN = re.compile(r"(?:RCID|RC)-(\d+)-(\d+)")
@@ -22,6 +25,7 @@ LEGACY_RECEPTION_CERTIFICATE_ID_PATTERN = re.compile(r"(?:RCID|RC)-(\d+)-(\d+)-(
 CIRCULARITY_CERTIFICATE_ID_PATTERN = re.compile(r"(?:CCID|CC)-(\d+)-(\d+)")
 LEGACY_CIRCULARITY_CERTIFICATE_ID_PATTERN = re.compile(r"(?:CCID|CC)-(\d+)-(\d+)-(\d+)-(\d+)")
 QUANTITY_WITH_UNIT_PATTERN = re.compile(r"^\s*([-+]?\d[\d,]*(?:\.\d+)?)\s+(.+?)\s*$")
+logger = logging.getLogger(__name__)
 
 
 def list_circularity_certificates(db: Session, principal: AuthPrincipal) -> list[CircularityCertificateResponse]:
@@ -102,6 +106,7 @@ def create_circularity_certificate(db: Session, payload: CircularityCertificateC
 	)
 
 	created_circularity_certificate = circularity_certificate_repository.create_circularity_certificate(db, circularity_certificate)
+	pre_generate_circularity_certificate_pdf(db, created_circularity_certificate, principal)
 	return serialize_circularity_certificate(created_circularity_certificate)
 
 
@@ -128,6 +133,15 @@ def generate_circularity_certificate_pdf(
 	circularity_certificate_reference: int | str,
 	principal: AuthPrincipal,
 ) -> tuple[str, bytes]:
+	filename, pdf_bytes, _cache_hit = generate_circularity_certificate_pdf_with_cache_status(db, circularity_certificate_reference, principal)
+	return filename, pdf_bytes
+
+
+def generate_circularity_certificate_pdf_with_cache_status(
+	db: Session,
+	circularity_certificate_reference: int | str,
+	principal: AuthPrincipal,
+) -> tuple[str, bytes, bool]:
 	circularity_certificate = get_circularity_certificate_for_pdf(db, circularity_certificate_reference)
 
 	if circularity_certificate is None or not can_access_circularity_certificate(circularity_certificate, principal):
@@ -137,9 +151,51 @@ def generate_circularity_certificate_pdf(
 	context = build_circularity_certificate_pdf_context(db, circularity_certificate, linked_reception_certificates)
 	normalized_ccid = normalize_ccid(circularity_certificate.ccid)
 	context["document_title"] = normalized_ccid
-	cache_version = get_circularity_certificate_pdf_cache_version(circularity_certificate)
-	cache_key = build_circularity_certificate_pdf_cache_key(normalized_ccid, context, cache_version)
-	pdf_bytes = generate_pdf(
+	fingerprint = build_circularity_certificate_pdf_fingerprint(normalized_ccid, context, get_circularity_certificate_pdf_cache_version(circularity_certificate))
+	filename, pdf_bytes, _cache_hit = get_or_create_certificate_pdf(
+		db,
+		circularity_certificate,
+		certificate_id=normalized_ccid,
+		certificate_type="circularity-certificate",
+		fingerprint=fingerprint,
+		render_pdf=lambda: render_circularity_certificate_pdf(normalized_ccid, context, circularity_certificate),
+	)
+	return filename, pdf_bytes, _cache_hit
+
+
+def pre_generate_circularity_certificate_pdf(db: Session, circularity_certificate: CircularityCertificate, principal: AuthPrincipal) -> None:
+	if normalize_status(circularity_certificate.status) != "Issued":
+		return
+
+	started_at = time.perf_counter()
+	try:
+		generate_circularity_certificate_pdf(db, circularity_certificate.ccid, principal)
+	except Exception as exc:
+		logger.warning(
+			"circularity_certificate_pdf_pregeneration_failed",
+			extra={
+				"certificate_id": circularity_certificate.ccid,
+				"error_type": type(exc).__name__,
+				"generation_time_ms": round((time.perf_counter() - started_at) * 1000, 2),
+			},
+		)
+	else:
+		logger.info(
+			"circularity_certificate_pdf_pregenerated",
+			extra={
+				"certificate_id": circularity_certificate.ccid,
+				"generation_time_ms": round((time.perf_counter() - started_at) * 1000, 2),
+			},
+		)
+
+
+def render_circularity_certificate_pdf(normalized_ccid: str, context: dict[str, object], circularity_certificate: CircularityCertificate) -> bytes:
+	cache_key = build_circularity_certificate_pdf_cache_key(
+		normalized_ccid,
+		context,
+		get_circularity_certificate_pdf_cache_version(circularity_certificate),
+	)
+	return generate_pdf(
 		"pdf/circularity_certificate.html",
 		context,
 		document_type="circularity-certificate",
@@ -147,8 +203,10 @@ def generate_circularity_certificate_pdf(
 		cache_key=cache_key,
 		cache_enabled=True,
 	)
-	filename = f"{normalized_ccid}.pdf"
-	return filename, pdf_bytes
+
+
+def build_circularity_certificate_pdf_fingerprint(normalized_ccid: str, context: dict[str, object], cache_version: object | None = None) -> str:
+	return build_pdf_content_fingerprint({"certificate_id": normalized_ccid, "cache_version": cache_version, "context": context})
 
 
 def build_circularity_certificate_pdf_cache_key(normalized_ccid: str, context: dict[str, object], cache_version: object | None = None) -> str:

@@ -1,6 +1,8 @@
 import hashlib
 import json
+import logging
 import re
+import time
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy.orm import Session
@@ -16,12 +18,18 @@ from app.schemas.reception_certificate import (
 	ReceptionCertificateUpdate,
 )
 from app.services.pdf_generation_service import generate_pdf
+from app.services.certificate_pdf_cache_service import (
+	build_pdf_content_fingerprint,
+	get_or_create_certificate_pdf,
+	invalidate_certificate_pdf_cache,
+)
 
 
 RECEPTION_NOTE_ID_PATTERN = re.compile(r"(?:RNID|RN)-(\d+)-(\d+)")
 RECEPTION_CERTIFICATE_ID_PATTERN = re.compile(r"(?:RCID|RC)-(\d+)-(\d+)")
 LEGACY_RECEPTION_CERTIFICATE_ID_PATTERN = re.compile(r"(?:RCID|RC)-(\d+)-(\d+)-(\d+)")
 QUANTITY_WITH_UNIT_PATTERN = re.compile(r"^\s*([-+]?\d[\d,]*(?:\.\d+)?)\s+(.+?)\s*$")
+logger = logging.getLogger(__name__)
 
 
 def list_reception_certificates(db: Session, principal: AuthPrincipal) -> list[ReceptionCertificateResponse]:
@@ -77,6 +85,7 @@ def create_reception_certificate(db: Session, payload: ReceptionCertificateCreat
 	)
 
 	created_reception_certificate = reception_certificate_repository.create_reception_certificate(db, reception_certificate)
+	pre_generate_reception_certificate_pdf(db, created_reception_certificate, principal)
 	return serialize_reception_certificate(created_reception_certificate)
 
 
@@ -126,6 +135,7 @@ def update_reception_certificate(db: Session, rcid: str, payload: ReceptionCerti
 		reception_certificate.rc_issued_by = payload.rcIssuedBy.strip()
 	if payload.status is not None:
 		reception_certificate.status = normalize_status(payload.status)
+	invalidate_certificate_pdf_cache(reception_certificate)
 
 	try:
 		db.commit()
@@ -134,6 +144,7 @@ def update_reception_certificate(db: Session, rcid: str, payload: ReceptionCerti
 		db.rollback()
 		raise
 
+	pre_generate_reception_certificate_pdf(db, reception_certificate, principal)
 	return serialize_reception_certificate(reception_certificate)
 
 
@@ -142,6 +153,15 @@ def generate_reception_certificate_pdf(
 	reception_certificate_reference: int | str,
 	principal: AuthPrincipal,
 ) -> tuple[str, bytes]:
+	filename, pdf_bytes, _cache_hit = generate_reception_certificate_pdf_with_cache_status(db, reception_certificate_reference, principal)
+	return filename, pdf_bytes
+
+
+def generate_reception_certificate_pdf_with_cache_status(
+	db: Session,
+	reception_certificate_reference: int | str,
+	principal: AuthPrincipal,
+) -> tuple[str, bytes, bool]:
 	reception_certificate = get_reception_certificate_for_pdf(db, reception_certificate_reference)
 
 	if reception_certificate is None or not can_access_reception_certificate(reception_certificate, principal):
@@ -151,8 +171,47 @@ def generate_reception_certificate_pdf(
 	context = build_reception_certificate_pdf_context(reception_certificate, linked_reception_notes)
 	normalized_rcid = normalize_rcid(reception_certificate.rcid)
 	context["document_title"] = normalized_rcid
+	fingerprint = build_reception_certificate_pdf_fingerprint(normalized_rcid, context)
+	filename, pdf_bytes, _cache_hit = get_or_create_certificate_pdf(
+		db,
+		reception_certificate,
+		certificate_id=normalized_rcid,
+		certificate_type="reception-certificate",
+		fingerprint=fingerprint,
+		render_pdf=lambda: render_reception_certificate_pdf(normalized_rcid, context),
+	)
+	return filename, pdf_bytes, _cache_hit
+
+
+def pre_generate_reception_certificate_pdf(db: Session, reception_certificate: ReceptionCertificate, principal: AuthPrincipal) -> None:
+	if normalize_status(reception_certificate.status) != "Issued":
+		return
+
+	started_at = time.perf_counter()
+	try:
+		generate_reception_certificate_pdf(db, reception_certificate.rcid, principal)
+	except Exception as exc:
+		logger.warning(
+			"reception_certificate_pdf_pregeneration_failed",
+			extra={
+				"certificate_id": reception_certificate.rcid,
+				"error_type": type(exc).__name__,
+				"generation_time_ms": round((time.perf_counter() - started_at) * 1000, 2),
+			},
+		)
+	else:
+		logger.info(
+			"reception_certificate_pdf_pregenerated",
+			extra={
+				"certificate_id": reception_certificate.rcid,
+				"generation_time_ms": round((time.perf_counter() - started_at) * 1000, 2),
+			},
+		)
+
+
+def render_reception_certificate_pdf(normalized_rcid: str, context: dict[str, object]) -> bytes:
 	cache_key = build_reception_certificate_pdf_cache_key(normalized_rcid, context)
-	pdf_bytes = generate_pdf(
+	return generate_pdf(
 		"pdf/reception_certificate.html",
 		context,
 		document_type="reception-certificate",
@@ -160,8 +219,10 @@ def generate_reception_certificate_pdf(
 		cache_key=cache_key,
 		cache_enabled=True,
 	)
-	filename = f"{normalized_rcid}.pdf"
-	return filename, pdf_bytes
+
+
+def build_reception_certificate_pdf_fingerprint(normalized_rcid: str, context: dict[str, object]) -> str:
+	return build_pdf_content_fingerprint({"certificate_id": normalized_rcid, "context": context})
 
 
 def build_reception_certificate_pdf_cache_key(normalized_rcid: str, context: dict[str, object]) -> str:
