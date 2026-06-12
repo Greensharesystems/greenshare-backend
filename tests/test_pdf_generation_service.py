@@ -1025,8 +1025,13 @@ def test_render_reception_certificate_template_supports_multi_linked_entries() -
 
 def test_render_circularity_certificate_template_supports_multi_linked_entries() -> None:
 	service = PdfGenerationService()
-	rendered_html = service.render_template("pdf/circularity_certificate.html", build_circularity_certificate_multi_pdf_context())
+	context = build_circularity_certificate_multi_pdf_context()
+	context["document_title"] = context["ccid"]
+	rendered_html = service.render_template("pdf/circularity_certificate.html", context)
 
+	assert "<title>CCID-0001-0001</title>" in rendered_html
+	assert '<h1 class="document-header__title">CIRCULARITY CERTIFICATE</h1>' in rendered_html
+	assert '<h1 class="document-header__title">CCID-0001-0001</h1>' not in rendered_html
 	assert "Linked Reception Certificates" in rendered_html
 	assert "Total Quantity" in rendered_html
 	assert "Linked Reception Certificate 1" in rendered_html

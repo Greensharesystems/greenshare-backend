@@ -319,7 +319,7 @@ def test_build_circularity_certificate_pdf_context_uses_upstream_reception_note(
 
 	assert context["ccid"] == "CCID-0001-0001"
 	assert context["linked_rcids"] == "RCID-0001-0001"
-	assert context["total_quantity"] == "1200"
+	assert context["total_quantity"] == "1200 kg"
 	assert context["has_multiple_linked_entries"] is False
 	assert context["has_expanded_linked_entries"] is False
 	assert len(context["linked_entries"]) == 1
@@ -380,7 +380,7 @@ def test_build_circularity_certificate_pdf_context_falls_back_to_certificate_sum
 	assert context["waste_stream_quantity"] == "1200"
 	assert context["waste_stream_quantity_unit"] == "kg"
 	assert context["waste_stream_code"] == ""
-	assert context["total_quantity"] == "1200"
+	assert context["total_quantity"] == "1200 Tons"
 	assert context["status"] == "Draft"
 
 
@@ -517,7 +517,7 @@ def test_build_circularity_certificate_pdf_context_expands_linked_reception_note
 
 	assert context["has_multiple_linked_entries"] is False
 	assert context["has_expanded_linked_entries"] is True
-	assert context["total_quantity"] == "1225"
+	assert context["total_quantity"] == "1225 kg"
 	assert context["secondary_ecosystem_mode"] == "shared"
 	assert len(context["linked_entries"]) == 1
 	assert context["linked_entries"][0]["has_multiple_linked_notes"] is True
@@ -679,7 +679,7 @@ def test_build_circularity_certificate_pdf_context_creates_grouped_linked_entrie
 	assert context["has_multiple_linked_entries"] is True
 	assert context["has_expanded_linked_entries"] is True
 	assert context["linked_rcids"] == "RCID-0001-0001, RCID-0001-0002"
-	assert context["total_quantity"] == "1225"
+	assert context["total_quantity"] == "1225 kg"
 	assert len(context["linked_entries"]) == 2
 	assert context["linked_entries"][0]["rcid"] == "RCID-0001-0001"
 	assert context["linked_entries"][0]["linked_notes"][0]["rnid"] == "RNID-0001-0001"
@@ -921,6 +921,137 @@ def test_build_circularity_certificate_pdf_context_assigns_secondary_ecosystem_p
 	assert context["show_shared_secondary_ecosystem_section"] is False
 	assert context["linked_entries"][0]["linked_notes"][0]["secondary_ecosystem"]["secondary_product"] == "Material"
 	assert context["linked_entries"][0]["linked_notes"][1]["secondary_ecosystem"]["secondary_loop"] == "Trader"
+
+
+def test_build_circularity_certificate_pdf_context_splits_combined_quantity_and_unit() -> None:
+	reception_certificate = ReceptionCertificate(
+		id=11,
+		rcid_date="2026-04-14",
+		rcid="RCID-0001-0001",
+		rnid="",
+		linked_rnids=[],
+		customer_id="CID-0001",
+		producing_company_name="Acme Recycling LLC",
+		waste_stream_quantity="25 kg",
+		rc_issued_by="Greenshare Operations",
+		owner_identifier="EMP-001",
+		owner_role="employee",
+		status="Issued",
+		created_at=datetime.now(),
+	)
+	circularity_certificate = CircularityCertificate(
+		id=13,
+		ccid_date="2026-04-15",
+		ccid="CCID-0001-0001",
+		rcid="RCID-0001-0001",
+		linked_rcids=["RCID-0001-0001"],
+		cid="CID-0001",
+		producing_company_name="Acme Recycling LLC",
+		waste_stream_quantity="25 kg",
+		secondary_product="Recycled Pellets",
+		secondary_loop="Closed Loop",
+		issued_by="Greenshare Circularity Team",
+		owner_identifier="EMP-001",
+		owner_role="employee",
+		status="Issued",
+		created_at=datetime.now(),
+	)
+
+	context = circularity_certificate_service.build_circularity_certificate_pdf_context(
+		None,
+		circularity_certificate,
+		[reception_certificate],
+	)
+
+	assert context["total_quantity"] == "25 kg"
+	assert context["waste_stream_quantity"] == "25"
+	assert context["waste_stream_quantity_unit"] == "kg"
+
+
+def test_build_circularity_certificate_pdf_context_falls_back_when_quantity_unit_is_missing() -> None:
+	reception_certificate = ReceptionCertificate(
+		id=11,
+		rcid_date="2026-04-14",
+		rcid="RCID-0001-0001",
+		rnid="",
+		linked_rnids=[],
+		customer_id="CID-0001",
+		producing_company_name="Acme Recycling LLC",
+		waste_stream_quantity="50",
+		rc_issued_by="Greenshare Operations",
+		owner_identifier="EMP-001",
+		owner_role="employee",
+		status="Issued",
+		created_at=datetime.now(),
+	)
+	circularity_certificate = CircularityCertificate(
+		id=13,
+		ccid_date="2026-04-15",
+		ccid="CCID-0001-0001",
+		rcid="RCID-0001-0001",
+		linked_rcids=["RCID-0001-0001"],
+		cid="CID-0001",
+		producing_company_name="Acme Recycling LLC",
+		waste_stream_quantity="50",
+		secondary_product="Recycled Pellets",
+		secondary_loop="Closed Loop",
+		issued_by="Greenshare Circularity Team",
+		owner_identifier="EMP-001",
+		owner_role="employee",
+		status="Issued",
+		created_at=datetime.now(),
+	)
+
+	context = circularity_certificate_service.build_circularity_certificate_pdf_context(
+		None,
+		circularity_certificate,
+		[reception_certificate],
+	)
+
+	assert context["total_quantity"] == "50"
+
+
+def test_build_circularity_certificate_pdf_context_handles_missing_quantity() -> None:
+	reception_certificate = ReceptionCertificate(
+		id=11,
+		rcid_date="2026-04-14",
+		rcid="RCID-0001-0001",
+		rnid="",
+		linked_rnids=[],
+		customer_id="CID-0001",
+		producing_company_name="Acme Recycling LLC",
+		waste_stream_quantity="",
+		rc_issued_by="Greenshare Operations",
+		owner_identifier="EMP-001",
+		owner_role="employee",
+		status="Issued",
+		created_at=datetime.now(),
+	)
+	circularity_certificate = CircularityCertificate(
+		id=13,
+		ccid_date="2026-04-15",
+		ccid="CCID-0001-0001",
+		rcid="RCID-0001-0001",
+		linked_rcids=["RCID-0001-0001"],
+		cid="CID-0001",
+		producing_company_name="Acme Recycling LLC",
+		waste_stream_quantity="",
+		secondary_product="Recycled Pellets",
+		secondary_loop="Closed Loop",
+		issued_by="Greenshare Circularity Team",
+		owner_identifier="EMP-001",
+		owner_role="employee",
+		status="Issued",
+		created_at=datetime.now(),
+	)
+
+	context = circularity_certificate_service.build_circularity_certificate_pdf_context(
+		None,
+		circularity_certificate,
+		[reception_certificate],
+	)
+
+	assert context["total_quantity"] == "N/A"
 
 
 def test_build_reception_certificate_pdf_context_splits_combined_quantity_and_unit() -> None:
