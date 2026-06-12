@@ -1,3 +1,5 @@
+import hashlib
+import json
 import re
 from decimal import Decimal, InvalidOperation
 
@@ -177,15 +179,24 @@ def generate_reception_note_pdf(db: Session, reception_note_reference: int | str
 
 	context = build_reception_note_pdf_context(reception_note)
 	normalized_rnid = get_reception_note_pdf_document_id(reception_note)
+	context["document_title"] = normalized_rnid
+	cache_key = build_reception_note_pdf_cache_key(normalized_rnid, context)
 	pdf_bytes = generate_pdf(
 		"pdf/reception_note.html",
 		context,
 		document_type="reception-note",
 		document_id=normalized_rnid,
-		cache_key=normalized_rnid,
+		cache_key=cache_key,
+		cache_enabled=True,
 	)
 	filename = f"{normalized_rnid}.pdf"
 	return filename, pdf_bytes
+
+
+def build_reception_note_pdf_cache_key(normalized_rnid: str, context: dict[str, str]) -> str:
+	serialized_context = json.dumps(context, sort_keys=True, separators=(",", ":"), default=str)
+	context_digest = hashlib.sha256(serialized_context.encode("utf-8")).hexdigest()
+	return f"{normalized_rnid}:{context_digest}"
 
 
 def get_reception_note(db: Session, rnid: str, principal: AuthPrincipal) -> ReceptionNoteResponse:

@@ -87,6 +87,22 @@ def test_build_reception_note_pdf_context_handles_missing_pdf_fields() -> None:
 	assert context["waste_stream_quantity_unit"] == ""
 
 
+def test_reception_note_pdf_cache_key_changes_when_pdf_content_changes() -> None:
+	context = {
+		"document_title": "RNID-0001-0001",
+		"rnid": "RNID-0001-0001",
+		"total_quantity": "100",
+		"waste_stream_quantity_unit": "Tons",
+	}
+	updated_context = {**context, "total_quantity": "101"}
+
+	first_key = reception_note_service.build_reception_note_pdf_cache_key("RNID-0001-0001", context)
+	second_key = reception_note_service.build_reception_note_pdf_cache_key("RNID-0001-0001", updated_context)
+
+	assert first_key.startswith("RNID-0001-0001:")
+	assert first_key != second_key
+
+
 def test_reception_note_edit_is_blocked_after_reception_certificate_is_issued(monkeypatch) -> None:
 	reception_note = ReceptionNote(
 		id=9,

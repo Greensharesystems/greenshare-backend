@@ -134,6 +134,7 @@ class PdfGenerationService:
 		document_type: str | None = None,
 		document_id: str | int | None = None,
 		cache_key: str | None = None,
+		cache_enabled: bool | None = None,
 	) -> bytes:
 		request_started_at = time.perf_counter()
 		template_filename = self._normalize_template_name(template_name)
@@ -146,6 +147,7 @@ class PdfGenerationService:
 			document_type=resolved_document_type,
 			document_id=cache_key or resolved_document_id,
 			template_version=template_version,
+			cache_enabled=cache_enabled,
 		)
 		logger.info(
 			"pdf_generation_requested",
@@ -462,7 +464,7 @@ class PdfGenerationService:
 			page = context.new_page()
 
 			page_render_started_at = time.perf_counter()
-			page.set_content(prepared_html, wait_until="networkidle")
+			page.set_content(prepared_html, wait_until="load")
 			page_render_ms = round((time.perf_counter() - page_render_started_at) * 1000, 2)
 
 			pdf_generation_started_at = time.perf_counter()
@@ -773,8 +775,10 @@ class PdfGenerationService:
 		document_type: str,
 		document_id: str,
 		template_version: str,
+		cache_enabled: bool | None = None,
 	) -> str | None:
-		if not self._in_memory_cache_enabled or self._in_memory_cache_ttl_seconds <= 0:
+		is_cache_enabled = self._in_memory_cache_enabled if cache_enabled is None else cache_enabled
+		if not is_cache_enabled or self._in_memory_cache_ttl_seconds <= 0:
 			return None
 
 		normalized_document_id = document_id.strip()
@@ -905,6 +909,7 @@ def generate_pdf(
 	document_type: str | None = None,
 	document_id: str | int | None = None,
 	cache_key: str | None = None,
+	cache_enabled: bool | None = None,
 ) -> bytes:
 	return pdf_generation_service.generate_pdf(
 		template_name,
@@ -912,4 +917,5 @@ def generate_pdf(
 		document_type=document_type,
 		document_id=document_id,
 		cache_key=cache_key,
+		cache_enabled=cache_enabled,
 	)

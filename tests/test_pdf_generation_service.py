@@ -453,7 +453,7 @@ def test_pdf_generation_uses_azure_safe_launch_and_closes_browser(monkeypatch: p
 			],
 		}
 	]
-	assert page_calls["wait_until"] == "networkidle"
+	assert page_calls["wait_until"] == "load"
 	assert page_calls["format"] == "A4"
 	assert page_calls["print_background"] is True
 	assert isinstance(page_calls["html"], str)
@@ -542,6 +542,86 @@ def test_pdf_generation_reuses_shared_browser_between_requests(monkeypatch: pyte
 	assert playwright_stop_count == 1
 	assert any(getattr(record, "browser_reused", None) is True for record in caplog.records)
 	assert all(getattr(record, "process_id", None) for record in caplog.records if record.name == "app.services.pdf_generation_service")
+
+
+def test_pdf_generation_cache_can_be_enabled_per_request(monkeypatch: pytest.MonkeyPatch) -> None:
+	page_render_count = 0
+	monkeypatch.setattr("app.services.pdf_generation_service.platform.system", lambda: "Linux")
+
+	class FakePage:
+		def __init__(self) -> None:
+			self.closed = False
+
+		def set_content(self, html: str, wait_until: str) -> None:
+			return None
+
+		def pdf(self, format: str, print_background: bool) -> bytes:
+			nonlocal page_render_count
+			page_render_count += 1
+			return b"%PDF-cached"
+
+		def is_closed(self) -> bool:
+			return self.closed
+
+		def close(self) -> None:
+			self.closed = True
+
+	class FakeContext:
+		def new_page(self) -> FakePage:
+			return FakePage()
+
+		def close(self) -> None:
+			return None
+
+	class FakeBrowser:
+		def is_connected(self) -> bool:
+			return True
+
+		def new_context(self) -> FakeContext:
+			return FakeContext()
+
+		def close(self) -> None:
+			return None
+
+	class FakeChromium:
+		executable_path = "/playwright/chromium/chrome"
+
+		def launch(self, **kwargs: object) -> FakeBrowser:
+			return FakeBrowser()
+
+	class FakePlaywright:
+		chromium = FakeChromium()
+
+		def stop(self) -> None:
+			return None
+
+	monkeypatch.setattr(
+		"app.services.pdf_generation_service.sync_playwright",
+		lambda: type("FakePlaywrightManager", (), {"start": staticmethod(lambda: FakePlaywright())})(),
+	)
+
+	service = PdfGenerationService()
+	first_pdf = service.generate_pdf(
+		"pdf/reception_note.html",
+		build_reception_note_pdf_context(),
+		document_type="reception-note",
+		document_id="RNID-0001-0001",
+		cache_key="RNID-0001-0001:test-fingerprint",
+		cache_enabled=True,
+	)
+	second_pdf = service.generate_pdf(
+		"pdf/reception_note.html",
+		build_reception_note_pdf_context(),
+		document_type="reception-note",
+		document_id="RNID-0001-0001",
+		cache_key="RNID-0001-0001:test-fingerprint",
+		cache_enabled=True,
+	)
+	service.close_shared_browser()
+
+	assert first_pdf == b"%PDF-cached"
+	assert second_pdf == b"%PDF-cached"
+	assert page_render_count == 1
 
 
 def test_pdf_generation_applies_concurrency_limiter_and_logs_wait(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
@@ -913,10 +993,13 @@ def test_pdf_generation_reuses_shared_browser_on_dedicated_render_thread(monkeyp
 
 def test_render_reception_note_template_supports_total_quantity() -> None:
 	service = PdfGenerationService()
-	rendered_html = service.render_template("pdf/reception_note.html", build_reception_note_pdf_context())
+	context = build_reception_note_pdf_context()
+	context["document_title"] = context["rnid"]
+	rendered_html = service.render_template("pdf/reception_note.html", context)
 
-	assert '<h1 class="document-header__title">RNID-0001-0001</h1>' in rendered_html
-	assert '<h1 class="document-header__title">RECEPTION NOTE</h1>' not in rendered_html
+	assert "<title>RNID-0001-0001</title>" in rendered_html
+	assert '<h1 class="document-header__title">RECEPTION NOTE</h1>' in rendered_html
+	assert '<h1 class="document-header__title">RNID-0001-0001</h1>' not in rendered_html
 	assert "Total Quantity" in rendered_html
 	assert "1200 kg" in rendered_html
 
