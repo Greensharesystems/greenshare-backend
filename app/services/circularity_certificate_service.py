@@ -1,3 +1,5 @@
+import hashlib
+import json
 import re
 from decimal import Decimal, InvalidOperation
 
@@ -134,15 +136,34 @@ def generate_circularity_certificate_pdf(
 	linked_reception_certificates = get_linked_reception_certificates(db, list(circularity_certificate.linked_rcids or []), principal)
 	context = build_circularity_certificate_pdf_context(db, circularity_certificate, linked_reception_certificates)
 	normalized_ccid = normalize_ccid(circularity_certificate.ccid)
+	context["document_title"] = normalized_ccid
+	cache_version = get_circularity_certificate_pdf_cache_version(circularity_certificate)
+	cache_key = build_circularity_certificate_pdf_cache_key(normalized_ccid, context, cache_version)
 	pdf_bytes = generate_pdf(
 		"pdf/circularity_certificate.html",
 		context,
 		document_type="circularity-certificate",
 		document_id=normalized_ccid,
-		cache_key=normalized_ccid,
+		cache_key=cache_key,
+		cache_enabled=True,
 	)
 	filename = f"{normalized_ccid}.pdf"
 	return filename, pdf_bytes
+
+
+def build_circularity_certificate_pdf_cache_key(normalized_ccid: str, context: dict[str, object], cache_version: object | None = None) -> str:
+	serialized_context = json.dumps(context, sort_keys=True, separators=(",", ":"), default=str)
+	context_digest = hashlib.sha256(serialized_context.encode("utf-8")).hexdigest()
+	cache_version_segment = str(cache_version or "").strip()
+
+	if cache_version_segment:
+		return f"{normalized_ccid}:{cache_version_segment}:{context_digest}"
+
+	return f"{normalized_ccid}:{context_digest}"
+
+
+def get_circularity_certificate_pdf_cache_version(circularity_certificate: CircularityCertificate) -> object | None:
+	return getattr(circularity_certificate, "updated_at", None) or getattr(circularity_certificate, "created_at", None)
 
 
 def get_circularity_certificate_for_pdf(
@@ -440,12 +461,14 @@ def build_circularity_certificate_pdf_context(
 	fallback_quantity, fallback_quantity_unit = split_quantity_and_unit(circularity_certificate.waste_stream_quantity)
 	has_expanded_linked_notes = any(bool(entry["has_multiple_linked_notes"]) for entry in linked_entries)
 	total_quantity = calculate_circularity_certificate_total_quantity(linked_entries)
+	total_quantity_unit = get_circularity_certificate_total_quantity_unit(linked_entries, fallback_quantity_unit)
+	total_quantity_display = format_quantity_with_unit(total_quantity or fallback_quantity, total_quantity_unit)
 
 	return {
 		"ccid_date": normalize_date_for_output(circularity_certificate.ccid_date),
 		"ccid": normalize_ccid(circularity_certificate.ccid),
 		"customer_id": circularity_certificate.cid,
-		"total_quantity": total_quantity or fallback_quantity,
+		"total_quantity": total_quantity_display,
 		"linked_rcids": ", ".join(list(circularity_certificate.linked_rcids or [])) or circularity_certificate.rcid,
 		"has_multiple_linked_entries": len(linked_entries) > 1,
 		"has_expanded_linked_entries": len(linked_entries) > 1 or has_expanded_linked_notes,
@@ -722,6 +745,56 @@ def calculate_circularity_certificate_total_quantity(linked_entries: list[dict[s
 	return sum_quantity_values(quantity_values)
 
 
+def get_circularity_certificate_total_quantity_unit(linked_entries: list[dict[str, object]], fallback_quantity_unit: str) -> str:
+	if fallback_quantity_unit.strip():
+		return fallback_quantity_unit.strip()
+
+	units: list[str] = []
+	for entry in linked_entries:
+		linked_notes = entry.get("linked_notes") or []
+		entry_units: list[str] = []
+
+		if linked_notes:
+			for note in linked_notes:
+				if not isinstance(note, dict):
+					continue
+
+				for waste_stream in note.get("waste_streams") or []:
+					if not isinstance(waste_stream, dict):
+						continue
+
+					quantity_unit = str(waste_stream.get("quantity_unit", "")).strip()
+					if quantity_unit and quantity_unit not in entry_units:
+						entry_units.append(quantity_unit)
+
+		if entry_units:
+			for quantity_unit in entry_units:
+				if quantity_unit not in units:
+					units.append(quantity_unit)
+			continue
+
+		primary_waste_stream = entry.get("primary_waste_stream") or {}
+		if isinstance(primary_waste_stream, dict):
+			quantity_unit = str(primary_waste_stream.get("quantity_unit", "")).strip()
+			if quantity_unit and quantity_unit not in units:
+				units.append(quantity_unit)
+
+	return join_unique_values(units)
+
+
+def format_quantity_with_unit(quantity: str, quantity_unit: str) -> str:
+	trimmed_quantity = str(quantity).strip()
+	trimmed_unit = str(quantity_unit).strip()
+
+	if not trimmed_quantity:
+		return "N/A"
+
+	if not trimmed_unit:
+		return trimmed_quantity
+
+	return f"{trimmed_quantity} {trimmed_unit}"
+
+
 def get_linked_rnids_from_reception_certificate(reception_certificate) -> list[str]:
 	linked_rnid_values = list(reception_certificate.linked_rnids or [])
 
@@ -831,12 +904,17 @@ def split_quantity_and_unit(quantity_value: str, quantity_unit: str = "") -> tup
 
 def sum_quantity_values(quantity_values: list[str]) -> str:
 	total = Decimal("0")
+	has_quantity = False
 
 	for quantity_value in quantity_values:
 		parsed_quantity = parse_decimal_quantity(quantity_value)
 
 		if parsed_quantity is not None:
+			has_quantity = True
 			total += parsed_quantity
+
+	if not has_quantity:
+		return ""
 
 	return format_decimal_quantity(total)
 

@@ -31,6 +31,29 @@ def test_view_circularity_certificate_pdf_returns_inline_headers(monkeypatch) ->
 	assert response.body == b"%PDF-test"
 
 
+def test_circularity_certificate_pdf_cache_key_changes_when_pdf_content_changes() -> None:
+	context = {
+		"document_title": "CCID-0001-0001",
+		"ccid": "CCID-0001-0001",
+		"total_quantity": "100 Tons",
+	}
+	updated_context = {**context, "total_quantity": "101 Tons"}
+
+	first_key = circularity_certificate_service.build_circularity_certificate_pdf_cache_key(
+		"CCID-0001-0001",
+		context,
+		"2026-04-15T10:00:00Z",
+	)
+	second_key = circularity_certificate_service.build_circularity_certificate_pdf_cache_key(
+		"CCID-0001-0001",
+		updated_context,
+		"2026-04-15T10:00:00Z",
+	)
+
+	assert first_key.startswith("CCID-0001-0001:2026-04-15T10:00:00Z:")
+	assert first_key != second_key
+
+
 def test_download_circularity_certificate_pdf_returns_attachment_headers(monkeypatch) -> None:
 	principal = AuthPrincipal(
 		email="employee@example.com",
