@@ -31,6 +31,21 @@ def test_view_reception_certificate_pdf_returns_inline_headers(monkeypatch) -> N
 	assert response.body == b"%PDF-test"
 
 
+def test_reception_certificate_pdf_cache_key_changes_when_pdf_content_changes() -> None:
+	context = {
+		"document_title": "RCID-0001-0001",
+		"rcid": "RCID-0001-0001",
+		"total_quantity": "100 Tons",
+	}
+	updated_context = {**context, "total_quantity": "101 Tons"}
+
+	first_key = reception_certificate_service.build_reception_certificate_pdf_cache_key("RCID-0001-0001", context)
+	second_key = reception_certificate_service.build_reception_certificate_pdf_cache_key("RCID-0001-0001", updated_context)
+
+	assert first_key.startswith("RCID-0001-0001:")
+	assert first_key != second_key
+
+
 def test_download_reception_certificate_pdf_returns_attachment_headers(monkeypatch) -> None:
 	principal = AuthPrincipal(
 		email="employee@example.com",

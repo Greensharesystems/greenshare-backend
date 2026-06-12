@@ -1,3 +1,5 @@
+import hashlib
+import json
 import re
 from decimal import Decimal, InvalidOperation
 
@@ -148,15 +150,24 @@ def generate_reception_certificate_pdf(
 	linked_reception_notes = get_linked_reception_notes(db, list(reception_certificate.linked_rnids or []), principal)
 	context = build_reception_certificate_pdf_context(reception_certificate, linked_reception_notes)
 	normalized_rcid = normalize_rcid(reception_certificate.rcid)
+	context["document_title"] = normalized_rcid
+	cache_key = build_reception_certificate_pdf_cache_key(normalized_rcid, context)
 	pdf_bytes = generate_pdf(
 		"pdf/reception_certificate.html",
 		context,
 		document_type="reception-certificate",
 		document_id=normalized_rcid,
-		cache_key=normalized_rcid,
+		cache_key=cache_key,
+		cache_enabled=True,
 	)
 	filename = f"{normalized_rcid}.pdf"
 	return filename, pdf_bytes
+
+
+def build_reception_certificate_pdf_cache_key(normalized_rcid: str, context: dict[str, object]) -> str:
+	serialized_context = json.dumps(context, sort_keys=True, separators=(",", ":"), default=str)
+	context_digest = hashlib.sha256(serialized_context.encode("utf-8")).hexdigest()
+	return f"{normalized_rcid}:{context_digest}"
 
 
 def get_reception_certificate_for_pdf(
@@ -376,18 +387,20 @@ PDF_VERIFIED_BY_POSITION = "CEO"
 def build_reception_certificate_pdf_context(
 	reception_certificate: ReceptionCertificate,
 	linked_reception_notes: list,
-) -> dict[str, str]:
+) -> dict[str, object]:
 	linked_entries = [build_linked_entry_context(reception_note) for reception_note in linked_reception_notes]
 	primary_entry = linked_entries[0] if linked_entries else build_empty_linked_entry_context()
 	shared_producing_company = build_shared_producing_company_context(reception_certificate, linked_reception_notes)
 	fallback_quantity, fallback_quantity_unit = split_quantity_and_unit(reception_certificate.waste_stream_quantity)
 	total_quantity = calculate_reception_certificate_total_quantity(linked_reception_notes)
+	total_quantity_unit = get_reception_certificate_total_quantity_unit(linked_entries, fallback_quantity_unit)
+	total_quantity_display = format_quantity_with_unit(total_quantity or fallback_quantity, total_quantity_unit)
 
 	return {
 		"rcid_date": normalize_date_for_output(reception_certificate.rcid_date),
 		"rcid": normalize_rcid(reception_certificate.rcid),
 		"customer_id": reception_certificate.customer_id,
-		"total_quantity": total_quantity or fallback_quantity,
+		"total_quantity": total_quantity_display,
 		"linked_rnids": ", ".join(list(reception_certificate.linked_rnids or [])) or reception_certificate.rnid,
 		"has_multiple_linked_entries": len(linked_entries) > 1,
 		"linked_entries": linked_entries,
@@ -590,14 +603,49 @@ def split_quantity_and_unit(quantity_value: str, quantity_unit: str = "") -> tup
 	return parsed_quantity, trimmed_unit or parsed_unit
 
 
+def get_reception_certificate_total_quantity_unit(linked_entries: list[dict[str, object]], fallback_quantity_unit: str) -> str:
+	if fallback_quantity_unit.strip():
+		return fallback_quantity_unit.strip()
+
+	units: list[str] = []
+	for entry in linked_entries:
+		for waste_stream in entry.get("waste_streams", []):
+			if not isinstance(waste_stream, dict):
+				continue
+
+			quantity_unit = str(waste_stream.get("quantity_unit", "")).strip()
+			if quantity_unit and quantity_unit not in units:
+				units.append(quantity_unit)
+
+	return join_unique_values(units)
+
+
+def format_quantity_with_unit(quantity: str, quantity_unit: str) -> str:
+	trimmed_quantity = str(quantity).strip()
+	trimmed_unit = str(quantity_unit).strip()
+
+	if not trimmed_quantity:
+		return "N/A"
+
+	if not trimmed_unit:
+		return trimmed_quantity
+
+	return f"{trimmed_quantity} {trimmed_unit}"
+
+
 def sum_quantity_values(quantity_values: list[str]) -> str:
 	total = Decimal("0")
+	has_quantity = False
 
 	for quantity_value in quantity_values:
 		parsed_quantity = parse_decimal_quantity(quantity_value)
 
 		if parsed_quantity is not None:
+			has_quantity = True
 			total += parsed_quantity
+
+	if not has_quantity:
+		return ""
 
 	return format_decimal_quantity(total)
 

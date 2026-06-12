@@ -103,7 +103,7 @@ def test_build_reception_certificate_pdf_context_uses_primary_linked_reception_n
 
 	assert context["rcid"] == "RCID-0001-0001"
 	assert context["linked_rnids"] == "RNID-0001-0001"
-	assert context["total_quantity"] == "1200"
+	assert context["total_quantity"] == "1200 kg"
 	assert context["has_multiple_linked_entries"] is False
 	assert len(context["linked_entries"]) == 1
 	assert context["linked_entries"][0]["rnid"] == "RNID-0001-0001"
@@ -217,7 +217,7 @@ def test_build_reception_certificate_pdf_context_creates_grouped_linked_entries(
 
 	assert context["has_multiple_linked_entries"] is True
 	assert context["linked_rnids"] == "RNID-0001-0001, RNID-0001-0002"
-	assert context["total_quantity"] == "1225"
+	assert context["total_quantity"] == "1225 kg"
 	assert context["producing_company_name"] == "Acme Recycling LLC"
 	assert len(context["linked_entries"]) == 2
 	assert context["linked_entries"][0]["rnid"] == "RNID-0001-0001"
@@ -942,5 +942,50 @@ def test_build_reception_certificate_pdf_context_splits_combined_quantity_and_un
 
 	context = reception_certificate_service.build_reception_certificate_pdf_context(reception_certificate, [])
 
+	assert context["total_quantity"] == "25 kg"
 	assert context["waste_stream_quantity"] == "25"
 	assert context["waste_stream_quantity_unit"] == "kg"
+
+
+def test_build_reception_certificate_pdf_context_falls_back_when_quantity_unit_is_missing() -> None:
+	reception_certificate = ReceptionCertificate(
+		id=9,
+		rcid_date="2026-04-14",
+		rcid="RCID-0001-0001",
+		rnid="RNID-0001-0001",
+		linked_rnids=["RNID-0001-0001"],
+		customer_id="CID-0001",
+		producing_company_name="Acme Recycling LLC",
+		waste_stream_quantity="50",
+		rc_issued_by="Greenshare Operations",
+		owner_identifier="EMP-001",
+		owner_role="employee",
+		status="Issued",
+		created_at=datetime.now(),
+	)
+
+	context = reception_certificate_service.build_reception_certificate_pdf_context(reception_certificate, [])
+
+	assert context["total_quantity"] == "50"
+
+
+def test_build_reception_certificate_pdf_context_handles_missing_quantity() -> None:
+	reception_certificate = ReceptionCertificate(
+		id=9,
+		rcid_date="2026-04-14",
+		rcid="RCID-0001-0001",
+		rnid="RNID-0001-0001",
+		linked_rnids=["RNID-0001-0001"],
+		customer_id="CID-0001",
+		producing_company_name="Acme Recycling LLC",
+		waste_stream_quantity="",
+		rc_issued_by="Greenshare Operations",
+		owner_identifier="EMP-001",
+		owner_role="employee",
+		status="Issued",
+		created_at=datetime.now(),
+	)
+
+	context = reception_certificate_service.build_reception_certificate_pdf_context(reception_certificate, [])
+
+	assert context["total_quantity"] == "N/A"
